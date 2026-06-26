@@ -1,0 +1,1475 @@
+/*
+ Copyright 2026 Google LLC
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+*/
+
+// Global variables
+let scene, camera, renderer, controls;
+let gridHelper, gridGroup;
+let robotGroup, startMarker, destMarker;
+let obstacleMeshes = [];
+let pathwayPlates = [];
+let floorMesh;
+let hoverMarker;
+let fountainParticles = []; // For realistic animated fountain water
+
+// Simulation State
+let isSimulating = false;
+let mapData = null;
+let movementCommands = [];
+let robotGridPos = { r: 0, c: 0 }; // Current grid row and column
+let robotFacingDegrees = 0;      // 0: NORTH, 90: EAST, 180: SOUTH, 270: WEST
+const CELL_SIZE = 2;              // Dimensions of each grid tile in Three.js units
+let uploadedFile = null;
+
+// Presets Definition
+const PRESETS = {
+    maze: "Construct a 6x6 room grid. The starting position is at [0, 0] and the target destination is at [5, 5]. There is a large couch occupying tiles [2, 2] and [2, 3], a brick wall from [4, 1] to [4, 3], and a custom indoor fountain at tile [1, 4]. Find a pathway and generate commands.",
+    park: "Construct an 8x8 room grid. Start at [7, 0] and destination at [0, 7]. A large custom indoor fountain is in the center at tiles [3, 3], [3, 4], [4, 3], and [4, 4]. Add two couches: one at [1, 1] and another at [6, 6]. A brick wall is at [2, 5] and [5, 2]. Dodging these central fountains and obstacles, find a path.",
+    empty: "Construct a 5x5 room grid with no obstacles. Start at [0, 0] and target destination is at [4, 4]. Direct straight pathway.",
+    custom: "Construct a 6x6 room grid. Start at [0, 0], destination at [5, 5]. A wall blocks the center from [2, 1] to [2, 4]. A couch is at [4, 2]. Make a path around it."
+};
+
+// Initialize Application
+document.addEventListener("DOMContentLoaded", () => {
+    initThree();
+    setupEventListeners();
+    loadPreset("maze");
+    animate();
+});
+
+// Initialize Three.js Scene
+function initThree() {
+    const container = document.getElementById("canvas-container");
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+
+    // Scene
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x04050a);
+    scene.fog = new THREE.FogExp2(0x04050a, 0.015);
+
+    // Camera
+    camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
+    camera.position.set(0, 12, 15);
+
+    // Renderer
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(width, height);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    container.appendChild(renderer.domElement);
+
+    // Orbit Controls
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.maxPolarAngle = Math.PI / 2 - 0.05; // Don't go below ground
+    controls.minDistance = 3;
+    controls.maxDistance = 40;
+
+    // Lights
+    const ambientLight = new THREE.AmbientLight(0x0a0c1a, 1.5);
+    scene.add(ambientLight);
+
+    const dirLight = new THREE.DirectionalLight(0x00d2ff, 1.2);
+    dirLight.position.set(10, 20, 10);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.width = 2048;
+    dirLight.shadow.mapSize.height = 2048;
+    dirLight.shadow.bias = -0.0001;
+    scene.add(dirLight);
+
+    // Cyberpunk grid floor lighting
+    const floorLight = new THREE.PointLight(0x00e676, 0.5, 30);
+    floorLight.position.set(0, 0.1, 0);
+    scene.add(floorLight);
+
+    // Groups
+    gridGroup = new THREE.Group();
+    scene.add(gridGroup);
+
+    // Hover Marker for Interactive Click Mode
+    const hoverGeo = new THREE.RingGeometry(0.7, 0.8, 4); // square ring since 4 segments
+    hoverGeo.rotateX(-Math.PI / 2);
+    hoverGeo.rotateY(Math.PI / 4); // align as square
+    const hoverMat = new THREE.MeshBasicMaterial({ color: 0x00d2ff, side: THREE.DoubleSide, transparent: true, opacity: 0.6 });
+    hoverMarker = new THREE.Mesh(hoverGeo, hoverMat);
+    hoverMarker.position.set(0, 0.02, 0);
+    hoverMarker.visible = false;
+    scene.add(hoverMarker);
+
+    // Handle Resize
+    window.addEventListener("resize", () => {
+        const w = container.clientWidth;
+        const h = container.clientHeight;
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+        renderer.setSize(w, h);
+    });
+}
+
+// Setup UI Listeners
+function setupEventListeners() {
+    // Preset Buttons
+    const presetButtons = document.querySelectorAll(".btn-preset");
+    presetButtons.forEach(btn => {
+        btn.addEventListener("click", (e) => {
+            presetButtons.forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+            loadPreset(btn.dataset.preset);
+        });
+    });
+
+    // Generate Button
+    document.getElementById("btn-generate").addEventListener("click", triggerAgentOrchestration);
+
+    // Sim Buttons
+    document.getElementById("btn-play-sim").addEventListener("click", runAutonomousSimulation);
+    document.getElementById("btn-reset-sim").addEventListener("click", resetSimulation);
+
+    // File Upload Elements
+    const uploadZone = document.getElementById("upload-zone");
+    const fileInput = document.getElementById("file-input");
+    const btnClearFile = document.getElementById("btn-clear-file");
+    
+    if (uploadZone && fileInput) {
+        uploadZone.addEventListener("click", () => fileInput.click());
+        
+        // Drag and drop
+        uploadZone.addEventListener("dragover", (e) => {
+            e.preventDefault();
+            uploadZone.classList.add("drag-over");
+        });
+        uploadZone.addEventListener("dragleave", () => {
+            uploadZone.classList.remove("drag-over");
+        });
+        uploadZone.addEventListener("drop", (e) => {
+            e.preventDefault();
+            uploadZone.classList.remove("drag-over");
+            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                handleFileUpload(e.dataTransfer.files[0]);
+            }
+        });
+        
+        fileInput.addEventListener("change", (e) => {
+            if (e.target.files && e.target.files.length > 0) {
+                handleFileUpload(e.target.files[0]);
+            }
+        });
+    }
+    
+    if (btnClearFile) {
+        btnClearFile.addEventListener("click", (e) => {
+            e.stopPropagation();
+            clearUploadedFile();
+        });
+    }
+
+    // Canvas Raycaster Events
+    const container = document.getElementById("canvas-container");
+    if (container) {
+        container.addEventListener("mousemove", onMouseMove);
+        container.addEventListener("click", onGridClick);
+    }
+
+    // Modal Events
+    const btnExport = document.getElementById("btn-export-payload");
+    const modal = document.getElementById("payload-modal");
+    const btnCloseModal = document.getElementById("btn-close-modal");
+    const btnCopyPayload = document.getElementById("btn-copy-payload");
+    
+    if (btnExport && modal && btnCloseModal) {
+        btnExport.addEventListener("click", () => {
+            if (window.hardwarePayload) {
+                const codeBlock = document.getElementById("payload-code-block");
+                codeBlock.textContent = JSON.stringify(window.hardwarePayload, null, 2);
+                modal.classList.remove("hidden");
+            }
+        });
+        
+        btnCloseModal.addEventListener("click", () => {
+            modal.classList.add("hidden");
+        });
+        
+        modal.addEventListener("click", (e) => {
+            if (e.target === modal) modal.classList.add("hidden");
+        });
+    }
+    
+    if (btnCopyPayload) {
+        btnCopyPayload.addEventListener("click", () => {
+            if (window.hardwarePayload) {
+                navigator.clipboard.writeText(JSON.stringify(window.hardwarePayload, null, 2))
+                    .then(() => {
+                        const origText = btnCopyPayload.innerHTML;
+                        btnCopyPayload.innerHTML = `<i class="fa-solid fa-check"></i> Copied!`;
+                        setTimeout(() => {
+                            btnCopyPayload.innerHTML = origText;
+                        }, 2000);
+                    })
+                    .catch(err => {
+                        console.error("Failed to copy text: ", err);
+                    });
+            }
+        });
+    }
+}
+
+// Load Prompt Presets
+function loadPreset(presetKey) {
+    const text = PRESETS[presetKey];
+    document.getElementById("prompt-input").value = text;
+}
+
+// Append Line to Terminal UI
+function logToTerminal(text, type = "system") {
+    const terminal = document.getElementById("terminal-body");
+    const line = document.createElement("div");
+    line.className = `terminal-line ${type}-line`;
+    
+    // Select the appropriate icon class
+    let iconClass = "";
+    if (type === "agent-header") iconClass = "fa-circle-info";
+    else if (type === "mcp-tool") iconClass = "fa-screwdriver-wrench";
+    else if (type === "success") iconClass = "fa-circle-check";
+    else if (type === "error") iconClass = "fa-triangle-exclamation";
+    
+    if (iconClass) {
+        const icon = document.createElement("i");
+        icon.className = `fa-solid ${iconClass}`;
+        line.appendChild(icon);
+        // Safely append text using createTextNode to prevent XSS injection
+        line.appendChild(document.createTextNode(" " + text));
+    } else {
+        // Safe assignment via textContent
+        line.textContent = text;
+    }
+    
+    terminal.appendChild(line);
+    terminal.scrollTop = terminal.scrollHeight;
+}
+
+// Trigger Multi-Agent Orchestration or Multimodal Upload on Backend
+async function triggerAgentOrchestration() {
+    const prompt = document.getElementById("prompt-input").value.trim();
+    
+    // Reset UI state
+    document.getElementById("btn-generate").disabled = true;
+    document.getElementById("btn-generate").innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Processing...`;
+    
+    const terminal = document.getElementById("terminal-body");
+    terminal.innerHTML = ""; // Clear log
+    
+    // If a file is uploaded or we are refining an active map
+    if (uploadedFile || (mapData && prompt)) {
+        logToTerminal("Initializing Multimodal Spatial Scan Parser...", "system");
+        if (uploadedFile) {
+            logToTerminal(`Sending file [${uploadedFile.name}] and customization prompt to Gemini spatial model.`, "agent-header");
+        } else {
+            logToTerminal("Sending current layout and customization prompt to Gemini spatial model.", "agent-header");
+        }
+        
+        try {
+            const formData = new FormData();
+            if (uploadedFile) {
+                formData.append("file", uploadedFile);
+            }
+            if (prompt) {
+                formData.append("custom_prompt", prompt);
+            }
+            if (mapData) {
+                formData.append("current_layout", JSON.stringify(mapData));
+            }
+            
+            const headers = {};
+            const userApiKey = document.getElementById("sys-param-token")?.value.trim();
+            if (userApiKey) {
+                headers["X-Gemini-API-Key"] = userApiKey;
+            }
+            
+            const response = await fetch("/api/upload-layout", {
+                method: "POST",
+                headers: headers,
+                body: formData
+            });
+            
+            const data = await response.json();
+            
+            if (!response.ok || data.status === "error") {
+                throw new Error(data.detail || data.message || "Failed to process multimodal upload");
+            }
+            
+            // Update Active AI Engine Status Badge
+            const badge = document.getElementById("ai-engine-badge");
+            if (badge && data.engine) {
+                if (data.engine === "ollama_fallback") {
+                    badge.className = "badge-engine badge-ollama";
+                    badge.innerHTML = `<i class="fa-solid fa-server"></i> Engine: Ollama (Local)`;
+                    logToTerminal("WARNING: Gemini API limit or error. Automatically fell back to local Ollama fallback engine.", "error");
+                } else {
+                    badge.className = "badge-engine badge-gemini";
+                    badge.innerHTML = `<i class="fa-solid fa-brain"></i> Engine: Gemini 2.5 Flash`;
+                }
+            }
+            
+            const engineLabel = data.engine === "ollama_fallback" ? "Ollama (Local)" : "Gemini";
+            logToTerminal(`${engineLabel}: Successfully parsed spatial map.`, "success");
+            logToTerminal("Generated Grid Map Matrix:\n" + JSON.stringify(data.map, null, 2), "agent-text");
+            
+            // Render the 3D Scene
+            mapData = data.map;
+            movementCommands = []; // Clicks will find paths dynamically
+            
+            build3DGridScene(mapData);
+            
+            // Clear path line and commands
+            drawPathway([]);
+            populateCommandsList([]);
+            
+            // Enable simulation controls
+            document.getElementById("btn-play-sim").disabled = true; // wait for path click
+            document.getElementById("btn-reset-sim").disabled = false;
+            
+            logToTerminal("3D Arena generated! Click anywhere on the walkable grid to set a target. The robot will dynamically navigate there in real-time.", "success");
+            
+        } catch (err) {
+            logToTerminal(`Upload parsing failed: ${err.message}`, "error");
+            console.error(err);
+        } finally {
+            document.getElementById("btn-generate").disabled = false;
+            document.getElementById("btn-generate").innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> Generate 3D Map & Path`;
+        }
+        return;
+    }
+
+    if (!prompt) {
+        document.getElementById("btn-generate").disabled = false;
+        document.getElementById("btn-generate").innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> Generate 3D Map & Path`;
+        return;
+    }
+
+    logToTerminal("Starting Spatial Robotics multi-agent graph...", "system");
+    logToTerminal("Agent 1 [vision_agent]: Initializing spatial scanner.", "agent-header");
+
+    try {
+        const headers = { "Content-Type": "application/json" };
+        const userApiKey = document.getElementById("sys-param-token")?.value.trim();
+        if (userApiKey) {
+            headers["X-Gemini-API-Key"] = userApiKey;
+        }
+
+        const response = await fetch("/api/run-orchestration", {
+            method: "POST",
+            headers: headers,
+            body: JSON.stringify({ layout_description: prompt })
+        });
+
+        const data = await response.json();
+        
+        if (!response.ok || data.status === "error") {
+            throw new Error(data.detail || data.message || "Pipeline error");
+        }
+
+        // Print agent stream logs to UI
+        if (data.log) {
+            data.log.forEach(event => {
+                if (event.author === "vision_agent") {
+                    if (event.text.includes("calculate_navigation_path")) {
+                        logToTerminal("vision_agent: Calling MCP Navigation Server calculate_navigation_path tool.", "mcp-tool");
+                    } else if (event.text.includes("map_matrix")) {
+                        logToTerminal("vision_agent: Parsed room layout & obstacles matrix.", "agent-header");
+                        logToTerminal(event.text, "agent-text");
+                    } else if (event.text.includes("transfer_to_agent")) {
+                        logToTerminal("vision_agent: Path calculated. Transferring control to [command_agent] via ADK graph.", "mcp-tool");
+                    }
+                } else if (event.author === "command_agent") {
+                    logToTerminal("Agent 2 [command_agent]: Received pathway coordinates.", "agent-header");
+                    logToTerminal("command_agent: Translating path into precise behavioral instructions.", "agent-header");
+                    logToTerminal(event.text, "agent-text");
+                }
+            });
+        }
+
+        logToTerminal("Orchestration pipeline complete! 3D Map and robot motion protocol generated.", "success");
+
+        // Set up the 3D Scene
+        mapData = data.map;
+        movementCommands = data.commands ? data.commands.commands : [];
+        
+        build3DGridScene(mapData);
+        populateCommandsList(movementCommands);
+
+        // Pre-draw the path if available
+        if (mapData.start && mapData.destination) {
+            // Reconstruct coordinate path from commands or do client BFS
+            const path = bfsPathfinder(mapData.map_matrix, mapData.start, mapData.destination);
+            if (path) {
+                drawPathway(path);
+                updateHardwarePayload(path, movementCommands);
+            }
+        }
+
+        // Enable simulation controls
+        document.getElementById("btn-play-sim").disabled = false;
+        document.getElementById("btn-reset-sim").disabled = false;
+
+    } catch (err) {
+        logToTerminal(`Execution failed: ${err.message}`, "error");
+        logToTerminal("Activating Demonstration Mode with local 3D pathfinding...", "success");
+        console.error(err);
+        loadDemonstrationMode(prompt);
+    } finally {
+        document.getElementById("btn-generate").disabled = false;
+        document.getElementById("btn-generate").innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> Generate 3D Map & Path`;
+    }
+}
+
+// Fallback Demonstration Mode when API Key is missing or server is offline
+function loadDemonstrationMode(promptText) {
+    const prompt = promptText.toLowerCase();
+    let presetType = "maze";
+    
+    if (prompt.includes("8x8") || prompt.includes("park") || prompt.includes("fountain park")) {
+        presetType = "park";
+    } else if (prompt.includes("5x5") || prompt.includes("empty") || prompt.includes("no obstacles")) {
+        presetType = "empty";
+    }
+    
+    logToTerminal("System Status: Local Pathfinder Loaded.", "success");
+    
+    if (presetType === "maze") {
+        mapData = {
+            grid_size: [6, 6],
+            start: [0, 0],
+            destination: [5, 5],
+            obstacles: [
+                { name: "couch", coordinates: [[2, 2], [2, 3]] },
+                { name: "fountain", coordinates: [[1, 4]] },
+                { name: "wall", coordinates: [[4, 1], [4, 2], [4, 3]] }
+            ]
+        };
+        movementCommands = [
+            "ROTATE_CLOCKWISE 90",
+            "MOVE_FORWARD 3 UNITS",
+            "ROTATE_CLOCKWISE 90",
+            "MOVE_FORWARD 1 UNITS",
+            "ROTATE_CLOCKWISE 90",
+            "MOVE_FORWARD 2 UNITS",
+            "ROTATE_COUNTER_CLOCKWISE 90",
+            "MOVE_FORWARD 2 UNITS",
+            "ROTATE_COUNTER_CLOCKWISE 90",
+            "MOVE_FORWARD 3 UNITS",
+            "ROTATE_CLOCKWISE 90",
+            "MOVE_FORWARD 2 UNITS",
+            "ROTATE_COUNTER_CLOCKWISE 90",
+            "MOVE_FORWARD 1 UNITS"
+        ];
+    } else if (presetType === "park") {
+        mapData = {
+            grid_size: [8, 8],
+            start: [7, 0],
+            destination: [0, 7],
+            obstacles: [
+                { name: "fountain", coordinates: [[3, 3], [3, 4], [4, 3], [4, 4]] },
+                { name: "couch", coordinates: [[1, 1], [6, 6]] },
+                { name: "wall", coordinates: [[2, 5], [5, 2]] }
+            ]
+        };
+        movementCommands = [
+            "MOVE_FORWARD 7 UNITS",
+            "ROTATE_CLOCKWISE 90",
+            "MOVE_FORWARD 7 UNITS"
+        ];
+    } else {
+        mapData = {
+            grid_size: [5, 5],
+            start: [0, 0],
+            destination: [4, 4],
+            obstacles: []
+        };
+        movementCommands = [
+            "ROTATE_CLOCKWISE 90",
+            "MOVE_FORWARD 4 UNITS",
+            "ROTATE_CLOCKWISE 90",
+            "MOVE_FORWARD 4 UNITS"
+        ];
+    }
+    
+    // Save locally for UI view
+    const output_map = JSON.stringify(mapData, null, 2);
+    const output_cmds = JSON.stringify({ commands: movementCommands }, null, 2);
+    
+    logToTerminal("Parsed grid map matrix:\n" + output_map, "agent-text");
+    logToTerminal("Calculated coordinate path and generated movements:\n" + output_cmds, "agent-text");
+    
+    // Build and render
+    build3DGridScene(mapData);
+    populateCommandsList(movementCommands);
+    
+    // Enable simulation controls
+    document.getElementById("btn-play-sim").disabled = false;
+    document.getElementById("btn-reset-sim").disabled = false;
+}
+
+/// Render 3D Grid, Obstacles, and Beacons
+function build3DGridScene(map) {
+    if (!map) return;
+    
+    // Clear previous objects
+    obstacleMeshes.forEach(mesh => scene.remove(mesh));
+    obstacleMeshes = [];
+    pathwayPlates.forEach(plate => scene.remove(plate));
+    pathwayPlates = [];
+    if (robotGroup) scene.remove(robotGroup);
+    if (startMarker) scene.remove(startMarker);
+    if (destMarker) scene.remove(destMarker);
+    
+    // Clear previous grid helper
+    gridGroup.clear();
+
+    const [rows, cols] = map.grid_size;
+    const gridH = rows * CELL_SIZE;
+    const gridW = cols * CELL_SIZE;
+
+    // Clear and reset fountain particles
+    fountainParticles.forEach(p => scene.remove(p));
+    fountainParticles = [];
+
+    // Create central grid helper
+    gridHelper = new THREE.GridHelper(Math.max(gridH, gridW), Math.max(rows, cols), 0x00d2ff, 0x141830);
+    gridHelper.position.set(0, 0, 0);
+    gridGroup.add(gridHelper);
+
+    // Create beautiful neon floor plane
+    const floorGeo = new THREE.PlaneGeometry(gridW, gridH);
+    const floorMat = new THREE.MeshStandardMaterial({
+        color: 0x070913,
+        roughness: 0.8,
+        metalness: 0.2,
+        side: THREE.DoubleSide
+    });
+    floorMesh = new THREE.Mesh(floorGeo, floorMat);
+    floorMesh.rotation.x = Math.PI / 2;
+    floorMesh.position.y = -0.01; // Just below grid helper
+    floorMesh.receiveShadow = true;
+    gridGroup.add(floorMesh);
+
+    // Center offset mapper function
+    const getCoords = (r, c) => {
+        const x = (c - (cols - 1) / 2) * CELL_SIZE;
+        const z = (r - (rows - 1) / 2) * CELL_SIZE;
+        return { x, z };
+    };
+
+    // Spawn Start and Destination Beacons
+    const beaconGeo = new THREE.CylinderGeometry(0.6, 0.6, 0.1, 32);
+    
+    // Start Beacon (Green)
+    const startPos = getCoords(map.start[0], map.start[1]);
+    const startMat = new THREE.MeshBasicMaterial({ color: 0x00e676 });
+    startMarker = new THREE.Mesh(beaconGeo, startMat);
+    startMarker.position.set(startPos.x, 0.05, startPos.z);
+    scene.add(startMarker);
+
+    // Destination Beacon (Red)
+    const destPos = getCoords(map.destination[0], map.destination[1]);
+    const destMat = new THREE.MeshBasicMaterial({ color: 0xff3d00 });
+    destMarker = new THREE.Mesh(beaconGeo, destMat);
+    destMarker.position.set(destPos.x, 0.05, destPos.z);
+    scene.add(destMarker);
+
+    // Add glowing vertical light beams for beacons
+    const beamGeo = new THREE.CylinderGeometry(0.05, 0.05, 4, 8, 1, true);
+    
+    const startBeamMat = new THREE.MeshBasicMaterial({
+        color: 0x00e676,
+        transparent: true,
+        opacity: 0.35,
+        side: THREE.DoubleSide
+    });
+    const startBeam = new THREE.Mesh(beamGeo, startBeamMat);
+    startBeam.position.set(startPos.x, 2, startPos.z);
+    scene.add(startBeam);
+    obstacleMeshes.push(startBeam);
+
+    const destBeamMat = new THREE.MeshBasicMaterial({
+        color: 0xff3d00,
+        transparent: true,
+        opacity: 0.35,
+        side: THREE.DoubleSide
+    });
+    const destBeam = new THREE.Mesh(beamGeo, destBeamMat);
+    destBeam.position.set(destPos.x, 2, destPos.z);
+    scene.add(destBeam);
+    obstacleMeshes.push(destBeam);
+
+    // Spawn Obstacles
+    map.obstacles.forEach(obs => {
+        const name = obs.name.toLowerCase();
+        obs.coordinates.forEach(coord => {
+            const pos = getCoords(coord[0], coord[1]);
+            let mesh;
+
+            if (name.includes("couch") || name.includes("sofa")) {
+                // Render a highly realistic 3D Sofa using compound boxes and cushions
+                mesh = new THREE.Group();
+                
+                // Seat Base
+                const seatGeo = new THREE.BoxGeometry(1.7, 0.3, 1.4);
+                const couchMat = new THREE.MeshStandardMaterial({ color: 0x5d4037, roughness: 0.7, metalness: 0.1 }); // Rich leather appearance
+                const seat = new THREE.Mesh(seatGeo, couchMat);
+                seat.position.y = 0.15;
+                seat.castShadow = true;
+                seat.receiveShadow = true;
+                mesh.add(seat);
+
+                // Two Seat Cushions (to look realistic)
+                const cushionGeo = new THREE.BoxGeometry(0.75, 0.15, 1.2);
+                const cushionMat = new THREE.MeshStandardMaterial({ color: 0x4e342e, roughness: 0.6 });
+                
+                const cushionL = new THREE.Mesh(cushionGeo, cushionMat);
+                cushionL.position.set(-0.4, 0.3, 0.05);
+                cushionL.castShadow = true;
+                mesh.add(cushionL);
+                
+                const cushionR = new THREE.Mesh(cushionGeo, cushionMat);
+                cushionR.position.set(0.4, 0.3, 0.05);
+                cushionR.castShadow = true;
+                mesh.add(cushionR);
+
+                // Backrest (pillow look)
+                const backGeo = new THREE.BoxGeometry(1.7, 0.65, 0.25);
+                const back = new THREE.Mesh(backGeo, couchMat);
+                back.position.set(0, 0.55, -0.55);
+                back.castShadow = true;
+                mesh.add(back);
+
+                // Left Armrest
+                const armGeo = new THREE.BoxGeometry(0.25, 0.5, 1.4);
+                const armL = new THREE.Mesh(armGeo, couchMat);
+                armL.position.set(-0.825, 0.3, 0);
+                armL.castShadow = true;
+                mesh.add(armL);
+
+                // Right Armrest
+                const armR = new THREE.Mesh(armGeo, couchMat);
+                armR.position.set(0.825, 0.3, 0);
+                armR.castShadow = true;
+                mesh.add(armR);
+
+                mesh.position.set(pos.x, 0, pos.z);
+
+            } else if (name.includes("wall")) {
+                // Render a sturdy brick-styled Wall block with bevelled look and metallic corner trims
+                mesh = new THREE.Group();
+                
+                // Main stone/brick block
+                const wallGeo = new THREE.BoxGeometry(1.9, 1.8, 1.9);
+                const wallMat = new THREE.MeshStandardMaterial({ color: 0x455a64, roughness: 0.85, metalness: 0.1 });
+                const mainBlock = new THREE.Mesh(wallGeo, wallMat);
+                mainBlock.position.y = 0.9;
+                mainBlock.castShadow = true;
+                mainBlock.receiveShadow = true;
+                mesh.add(mainBlock);
+                
+                // Metallic corner support trims (for realistic industrial-cyber aesthetic)
+                const trimGeo = new THREE.BoxGeometry(0.1, 1.85, 0.1);
+                const trimMat = new THREE.MeshStandardMaterial({ color: 0x90a4ae, metalness: 0.85, roughness: 0.2 });
+                
+                const corners = [
+                    [-0.95, -0.95],
+                    [0.95, -0.95],
+                    [-0.95, 0.95],
+                    [0.95, 0.95]
+                ];
+                
+                corners.forEach(c => {
+                    const trim = new THREE.Mesh(trimGeo, trimMat);
+                    trim.position.set(c[0], 0.925, c[1]);
+                    mesh.add(trim);
+                });
+                
+                mesh.position.set(pos.x, 0, pos.z);
+
+            } else if (name.includes("fountain")) {
+                // Render an animated high-tech water fountain
+                mesh = new THREE.Group();
+                
+                // Metallic Outer Basin
+                const basinGeo = new THREE.CylinderGeometry(0.85, 0.85, 0.35, 16);
+                const basinMat = new THREE.MeshStandardMaterial({ color: 0x1a237e, metalness: 0.9, roughness: 0.1 });
+                const basin = new THREE.Mesh(basinGeo, basinMat);
+                basin.position.y = 0.175;
+                basin.castShadow = true;
+                mesh.add(basin);
+
+                // Water glow plate
+                const waterGeo = new THREE.CylinderGeometry(0.78, 0.78, 0.05, 16);
+                const waterMat = new THREE.MeshStandardMaterial({
+                    color: 0x00d2ff,
+                    emissive: 0x00a2ff,
+                    emissiveIntensity: 0.8,
+                    transparent: true,
+                    opacity: 0.85
+                });
+                const water = new THREE.Mesh(waterGeo, waterMat);
+                water.position.y = 0.33;
+                mesh.add(water);
+
+                // Center Spout
+                const jetGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.6, 8);
+                const jet = new THREE.Mesh(jetGeo, basinMat);
+                jet.position.y = 0.5;
+                mesh.add(jet);
+                
+                // Add animated water particles
+                const particleCount = 10;
+                const pGeo = new THREE.SphereGeometry(0.08, 8, 8);
+                const pMat = new THREE.MeshBasicMaterial({ color: 0x00d2ff, transparent: true, opacity: 0.8 });
+                
+                for (let k = 0; k < particleCount; k++) {
+                    const p = new THREE.Mesh(pGeo, pMat);
+                    // Distribute particles vertically
+                    p.position.set(pos.x, 0.5 + (k / particleCount) * 0.8, pos.z);
+                    // Add physics parameters
+                    p.userData = {
+                        vy: 0.03 + Math.random() * 0.03,
+                        vx: (Math.random() - 0.5) * 0.008,
+                        vz: (Math.random() - 0.5) * 0.008,
+                        startY: 0.5,
+                        startX: pos.x,
+                        startZ: pos.z
+                    };
+                    scene.add(p);
+                    fountainParticles.push(p);
+                }
+
+                mesh.position.set(pos.x, 0, pos.z);
+            } else {
+                // Fallback basic obstacle box
+                const fallbackGeo = new THREE.BoxGeometry(1.6, 1.2, 1.6);
+                const fallbackMat = new THREE.MeshStandardMaterial({ color: 0x9e9e9e });
+                mesh = new THREE.Mesh(fallbackGeo, fallbackMat);
+                mesh.position.set(pos.x, 0.6, pos.z);
+                mesh.castShadow = true;
+            }
+
+            scene.add(mesh);
+            obstacleMeshes.push(mesh);
+        });
+    });
+
+    // Spawn Futuristic Robot Car with high gloss metal finishes
+    buildRobotMesh(startPos.x, startPos.z);
+    
+    // Position camera dynamically to fit the grid
+    camera.position.set(0, Math.max(rows, cols) * 2, Math.max(rows, cols) * 2.5);
+    controls.target.set(0, 0, 0);
+    controls.update();
+
+    // Reset tracking state
+    robotGridPos = { r: map.start[0], c: map.start[1] };
+    robotFacingDegrees = 0; // Starts facing NORTH
+    robotGroup.rotation.y = 0; // facing Z decreasing (NORTH)
+}
+
+// Build the futuristic Robot Car Mesh with realistic materials
+function buildRobotMesh(startX, startZ) {
+    robotGroup = new THREE.Group();
+
+    // Main metallic chassis
+    const chassisGeo = new THREE.BoxGeometry(1.0, 0.35, 1.2);
+    const chassisMat = new THREE.MeshStandardMaterial({ color: 0xffd600, metalness: 0.9, roughness: 0.15 }); // High-gloss metallic yellow paint
+    const chassis = new THREE.Mesh(chassisGeo, chassisMat);
+    chassis.position.y = 0.25;
+    chassis.castShadow = true;
+    robotGroup.add(chassis);
+
+    // Glowing front windshield (cyber eyes)
+    const eyesGeo = new THREE.BoxGeometry(0.8, 0.15, 0.1);
+    const eyesMat = new THREE.MeshStandardMaterial({ color: 0x00d2ff, emissive: 0x00d2ff, emissiveIntensity: 1.5 });
+    const eyes = new THREE.Mesh(eyesGeo, eyesMat);
+    eyes.position.set(0, 0.3, -0.6); // Front of the robot (z is negative)
+    robotGroup.add(eyes);
+
+    // Wheels (4 cylinders with detailed alloy appearance)
+    const wheelGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.15, 16);
+    const wheelMat = new THREE.MeshStandardMaterial({ color: 0x212121, roughness: 0.6, metalness: 0.4 });
+    
+    const wPositions = [
+        [-0.58, 0.2, -0.35], // Front Left
+        [0.58, 0.2, -0.35],  // Front Right
+        [-0.58, 0.2, 0.35],  // Back Left
+        [0.58, 0.2, 0.35]   // Back Right
+    ];
+
+    wPositions.forEach(pos => {
+        const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+        wheel.rotation.z = Math.PI / 2;
+        wheel.position.set(pos[0], pos[1], pos[2]);
+        wheel.castShadow = true;
+        robotGroup.add(wheel);
+    });
+
+    // Spinning Lidar Scanner on top
+    const lidarGeo = new THREE.CylinderGeometry(0.15, 0.15, 0.25, 12);
+    const lidarMat = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.95, roughness: 0.1 });
+    const lidar = new THREE.Mesh(lidarGeo, lidarMat);
+    lidar.position.set(0, 0.5, 0.1);
+    robotGroup.add(lidar);
+
+    const lidarGlowGeo = new THREE.CylinderGeometry(0.16, 0.16, 0.05, 12);
+    const lidarGlowMat = new THREE.MeshBasicMaterial({ color: 0x00d2ff });
+    const lidarGlow = new THREE.Mesh(lidarGlowGeo, lidarGlowMat);
+    lidarGlow.position.set(0, 0.5, 0.1);
+    robotGroup.add(lidarGlow);
+
+    // Directional glowing arrow (pointing NORTH / front)
+    const arrowGeo = new THREE.ConeGeometry(0.15, 0.4, 4);
+    const arrowMat = new THREE.MeshBasicMaterial({ color: 0x00e676 });
+    const arrow = new THREE.Mesh(arrowGeo, arrowMat);
+    arrow.rotation.x = -Math.PI / 2;
+    arrow.position.set(0, 0.45, -0.3); // pointed front (negative Z)
+    robotGroup.add(arrow);
+
+    // Position robot
+    robotGroup.position.set(startX, 0, startZ);
+    scene.add(robotGroup);
+}
+
+// Populate the bottom panel with movement command cards
+function populateCommandsList(commands) {
+    const list = document.getElementById("commands-list");
+    list.innerHTML = ""; // Clear
+
+    if (!commands || commands.length === 0) {
+        list.innerHTML = `<div class="no-commands-message">No commands generated yet. Trigger the agent graph above.</div>`;
+        return;
+    }
+
+    commands.forEach((cmd, idx) => {
+        const card = document.createElement("div");
+        card.className = "command-card";
+        card.id = `cmd-card-${idx}`;
+        
+        let icon = "fa-arrow-up-long";
+        if (cmd.includes("CLOCKWISE") && !cmd.includes("COUNTER")) {
+            icon = "fa-rotate-right";
+        } else if (cmd.includes("COUNTER_CLOCKWISE")) {
+            icon = "fa-rotate-left";
+        }
+
+        card.innerHTML = `
+            <div class="cmd-num">Step ${idx + 1}</div>
+            <div class="cmd-val"><i class="fa-solid ${icon}"></i> ${cmd}</div>
+        `;
+        list.appendChild(card);
+    });
+}
+
+// Start smooth animation loop for autonomous navigation
+async function runAutonomousSimulation() {
+    if (isSimulating || !movementCommands || movementCommands.length === 0) return;
+    
+    isSimulating = true;
+    document.getElementById("btn-play-sim").disabled = true;
+    document.getElementById("btn-reset-sim").disabled = true;
+    document.getElementById("prompt-input").disabled = true;
+    document.getElementById("btn-generate").disabled = true;
+    
+    const overlay = document.getElementById("active-command-overlay");
+    const cmdSpan = document.getElementById("current-command-span");
+    overlay.classList.remove("hidden");
+
+    logToTerminal("Initializing robot autonomous locomotion protocol...", "success");
+
+    const [rows, cols] = mapData.grid_size;
+    const getCoords = (r, c) => {
+        const x = (c - (cols - 1) / 2) * CELL_SIZE;
+        const z = (r - (rows - 1) / 2) * CELL_SIZE;
+        return { x, z };
+    };
+
+    // Execute each command step-by-step smoothly
+    for (let i = 0; i < movementCommands.length; i++) {
+        if (!isSimulating) break; // In case of reset / stop
+        
+        const cmd = movementCommands[i];
+        cmdSpan.textContent = cmd;
+        
+        // Highlight active card
+        document.querySelectorAll(".command-card").forEach(c => c.classList.remove("active"));
+        const activeCard = document.getElementById(`cmd-card-${i}`);
+        if (activeCard) {
+            activeCard.classList.add("active");
+            activeCard.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+        }
+
+        logToTerminal(`Executing movement: ${cmd}`, "system");
+
+        if (cmd.includes("MOVE_FORWARD")) {
+            // Parse units
+            const units = parseInt(cmd.match(/\d+/)[0]);
+            
+            // Calculate target position based on current facing direction
+            let targetR = robotGridPos.r;
+            let targetC = robotGridPos.c;
+            
+            // 0: NORTH (row-), 90: EAST (col+), 180: SOUTH (row+), 270: WEST (col-)
+            const heading = robotFacingDegrees % 360;
+            if (heading === 0 || heading === 360) {
+                targetR -= units;
+            } else if (heading === 90 || heading === -270) {
+                targetC += units;
+            } else if (heading === 180 || heading === -180) {
+                targetR += units;
+            } else if (heading === 270 || heading === -90) {
+                targetC -= units;
+            }
+
+            const currentPos = getCoords(robotGridPos.r, robotGridPos.c);
+            const targetPos = getCoords(targetR, targetC);
+
+            // Animate translation
+            await animateMove(currentPos, targetPos, units);
+            
+            // Update position
+            robotGridPos.r = targetR;
+            robotGridPos.c = targetC;
+
+        } else if (cmd.includes("ROTATE_CLOCKWISE") || cmd.includes("ROTATE_COUNTER_CLOCKWISE")) {
+            const isCW = cmd.includes("ROTATE_CLOCKWISE");
+            const degrees = parseInt(cmd.match(/\d+/)[0]);
+            const delta = isCW ? degrees : -degrees;
+            
+            const startAngle = -robotFacingDegrees * Math.PI / 180;
+            const endAngle = -(robotFacingDegrees + delta) * Math.PI / 180;
+
+            // Animate rotation
+            await animateRotate(startAngle, endAngle);
+
+            // Update heading
+            robotFacingDegrees = (robotFacingDegrees + delta) % 360;
+            if (robotFacingDegrees < 0) robotFacingDegrees += 360;
+        }
+
+        // Mark card as completed
+        if (activeCard) {
+            activeCard.classList.remove("active");
+            activeCard.classList.add("completed");
+        }
+        
+        // Wait brief moment between commands
+        await sleep(400);
+    }
+
+    logToTerminal("Autonomous mission accomplished! Destination successfully reached.", "success");
+    overlay.classList.add("hidden");
+    
+    isSimulating = false;
+    document.getElementById("btn-play-sim").disabled = false;
+    document.getElementById("btn-reset-sim").disabled = false;
+    document.getElementById("prompt-input").disabled = false;
+    document.getElementById("btn-generate").disabled = false;
+}
+
+// Reset Arena & Robot back to Start
+function resetSimulation() {
+    if (isSimulating || !mapData) return;
+
+    logToTerminal("Resetting robot position and command list.", "system");
+
+    const [rows, cols] = mapData.grid_size;
+    const getCoords = (r, c) => {
+        const x = (c - (cols - 1) / 2) * CELL_SIZE;
+        const z = (r - (rows - 1) / 2) * CELL_SIZE;
+        return { x, z };
+    };
+
+    const startPos = getCoords(mapData.start[0], mapData.start[1]);
+    
+    // Reset robot mesh Y rotation and position
+    robotGroup.position.set(startPos.x, 0, startPos.z);
+    robotGroup.rotation.y = 0;
+
+    // Reset tracking state
+    robotGridPos = { r: mapData.start[0], c: mapData.start[1] };
+    robotFacingDegrees = 0; // facing NORTH
+
+    // Clear command visual states
+    document.querySelectorAll(".command-card").forEach(c => {
+        c.classList.remove("active");
+        c.classList.remove("completed");
+    });
+}
+
+// Helper: Animate robot translation
+function animateMove(start, end, units) {
+    return new Promise((resolve) => {
+        const duration = 800 * units; // 800ms per cell
+        const startTime = performance.now();
+        
+        function update(now) {
+            const elapsed = now - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+            
+            // Smooth easeInOutQuad easing
+            const ease = progress < 0.5 
+                ? 2 * progress * progress 
+                : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+
+            // Interpolate position
+            robotGroup.position.x = start.x + (end.x - start.x) * ease;
+            robotGroup.position.z = start.z + (end.z - start.z) * ease;
+
+            // Spin lidar and wheels
+            spinRobotComponents(progress, units);
+
+            if (progress < 1) {
+                requestAnimationFrame(update);
+            } else {
+                robotGroup.position.x = end.x;
+                robotGroup.position.z = end.z;
+                resolve();
+            }
+        }
+        requestAnimationFrame(update);
+    });
+}
+
+// Helper: Animate robot rotation
+function animateRotate(startAngle, endAngle) {
+    return new Promise((resolve) => {
+        const duration = 600; // 600ms constant for rotation
+        const startTime = performance.now();
+
+        function update(now) {
+            const elapsed = now - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+            
+            const ease = progress < 0.5 
+                ? 2 * progress * progress 
+                : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+
+            // Interpolate angle
+            robotGroup.rotation.y = startAngle + (endAngle - startAngle) * ease;
+
+            // Spin lidar and wheels opposite directions
+            spinRobotComponents(progress, 0.5);
+
+            if (progress < 1) {
+                requestAnimationFrame(update);
+            } else {
+                robotGroup.rotation.y = endAngle;
+                resolve();
+            }
+        }
+        requestAnimationFrame(update);
+    });
+}
+
+// Helper: Spin Lidar and Wheels during movement
+function spinRobotComponents(progress, speedMultiplier) {
+    // Spin Lidar scanner (top cylinder)
+    if (robotGroup.children[3]) {
+        robotGroup.children[3].rotation.y += 0.15; // Spinning fast
+        robotGroup.children[4].rotation.y += 0.15;
+    }
+
+    // Spin 4 Wheels
+    // Children index 2 is the eyes, wheels are children indices 5, 6, 7, 8
+    for (let j = 5; j <= 8; j++) {
+        if (robotGroup.children[j]) {
+            robotGroup.children[j].rotation.x += 0.08 * speedMultiplier;
+        }
+    }
+}
+
+// Helper utilities
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Main Animation loop
+function animate() {
+    requestAnimationFrame(animate);
+    
+    // Idle LIDAR scanning animation
+    if (robotGroup && !isSimulating) {
+        if (robotGroup.children[3]) {
+            robotGroup.children[3].rotation.y += 0.02;
+            robotGroup.children[4].rotation.y += 0.02;
+        }
+    }
+
+    // Idle Water Fountain animation
+    obstacleMeshes.forEach(mesh => {
+        if (mesh.children && mesh.children[3]) {
+            // Float water sphere slightly
+            mesh.children[3].position.y = 1.0 + Math.sin(performance.now() * 0.005) * 0.05;
+        }
+    });
+
+    // Fountain water particles animation
+    fountainParticles.forEach(p => {
+        p.position.y += p.userData.vy;
+        p.position.x += p.userData.vx;
+        p.position.z += p.userData.vz;
+        p.userData.vy -= 0.0025; // gravity effect
+        
+        // Reset when falling back down
+        if (p.position.y < p.userData.startY) {
+            p.position.set(p.userData.startX, p.userData.startY, p.userData.startZ);
+            p.userData.vy = 0.03 + Math.random() * 0.03;
+            p.userData.vx = (Math.random() - 0.5) * 0.006;
+            p.userData.vz = (Math.random() - 0.5) * 0.006;
+        }
+    });
+
+    if (controls) controls.update();
+    if (renderer && scene && camera) renderer.render(scene, camera);
+}
+
+// ============================================================================
+// MULTIMODAL UPLOAD & CLIENT-SIDE DYNAMIC NAVIGATION HELPERS
+// ============================================================================
+
+// Handle File Drop / Select Preview
+function handleFileUpload(file) {
+    uploadedFile = file;
+    const filePreview = document.getElementById("file-preview-container");
+    const filePreviewName = document.getElementById("file-preview-name");
+    const uploadZone = document.getElementById("upload-zone");
+    
+    if (filePreview && filePreviewName && uploadZone) {
+        filePreviewName.textContent = file.name;
+        filePreview.classList.remove("hidden");
+        uploadZone.style.display = "none";
+        
+        // Update file icon in preview if video
+        const icon = filePreview.querySelector(".preview-file-icon");
+        if (icon) {
+            if (file.type.startsWith("video/")) {
+                icon.className = "fa-solid fa-file-video preview-file-icon";
+            } else {
+                icon.className = "fa-solid fa-file-image preview-file-icon";
+            }
+        }
+        
+        logToTerminal(`File loaded: ${file.name}. Ready to parse 3D map. Click 'Generate 3D Map & Path' to begin.`, "system");
+    }
+}
+
+// Clear Uploaded File
+function clearUploadedFile() {
+    uploadedFile = null;
+    const filePreview = document.getElementById("file-preview-container");
+    const uploadZone = document.getElementById("upload-zone");
+    const fileInput = document.getElementById("file-input");
+    
+    if (filePreview && uploadZone && fileInput) {
+        filePreview.classList.add("hidden");
+        uploadZone.style.display = "flex";
+        fileInput.value = "";
+        logToTerminal("Uploaded file cleared.", "system");
+    }
+}
+
+// Mouse Move: Raycast floor grid mesh to highlight hovered cell
+let mouse = new THREE.Vector2();
+let raycaster = new THREE.Raycaster();
+
+function onMouseMove(event) {
+    if (!mapData || isSimulating) return;
+    
+    const container = document.getElementById("canvas-container");
+    const rect = container.getBoundingClientRect();
+    
+    // Calculate mouse position in normalized device coordinates (-1 to +1)
+    mouse.x = ((event.clientX - rect.left) / container.clientWidth) * 2 - 1;
+    mouse.y = -((event.clientY - rect.top) / container.clientHeight) * 2 + 1;
+    
+    raycaster.setFromCamera(mouse, camera);
+    
+    if (floorMesh) {
+        const intersects = raycaster.intersectObject(floorMesh);
+        if (intersects.length > 0) {
+            const point = intersects[0].point;
+            const [rows, cols] = mapData.grid_size;
+            
+            // Convert 3D position back to grid coordinates
+            const c = Math.round(point.x / CELL_SIZE + (cols - 1) / 2);
+            const r = Math.round(point.z / CELL_SIZE + (rows - 1) / 2);
+            
+            if (r >= 0 && r < rows && c >= 0 && c < cols) {
+                const getCoords = (r, c) => {
+                    const x = (c - (cols - 1) / 2) * CELL_SIZE;
+                    const z = (r - (rows - 1) / 2) * CELL_SIZE;
+                    return { x, z };
+                };
+                const pos = getCoords(r, c);
+                hoverMarker.position.set(pos.x, 0.02, pos.z);
+                
+                // If it's a walkable cell, show cyan, else red
+                if (mapData.map_matrix[r][c] === 0) {
+                    hoverMarker.material.color.setHex(0x00d2ff); // cyan
+                } else {
+                    hoverMarker.material.color.setHex(0xff3d00); // red
+                }
+                hoverMarker.visible = true;
+                return;
+            }
+        }
+    }
+    hoverMarker.visible = false;
+}
+
+// Mouse Click: Raycast floor grid mesh to move robot in real-time
+async function onGridClick(event) {
+    if (isSimulating || !mapData) return;
+    
+    const container = document.getElementById("canvas-container");
+    const rect = container.getBoundingClientRect();
+    
+    mouse.x = ((event.clientX - rect.left) / container.clientWidth) * 2 - 1;
+    mouse.y = -((event.clientY - rect.top) / container.clientHeight) * 2 + 1;
+    
+    raycaster.setFromCamera(mouse, camera);
+    
+    if (floorMesh) {
+        const intersects = raycaster.intersectObject(floorMesh);
+        if (intersects.length > 0) {
+            const point = intersects[0].point;
+            const [rows, cols] = mapData.grid_size;
+            
+            const c = Math.round(point.x / CELL_SIZE + (cols - 1) / 2);
+            const r = Math.round(point.z / CELL_SIZE + (rows - 1) / 2);
+            
+            if (r >= 0 && r < rows && c >= 0 && c < cols) {
+                // If clicked an obstacle, warn and do nothing
+                if (mapData.map_matrix[r][c] !== 0) {
+                    logToTerminal(`Cannot navigate: Target cell [${r}, ${c}] is blocked by an obstacle.`, "error");
+                    return;
+                }
+                
+                logToTerminal(`Interactive Navigation: Target cell set to [${r}, ${c}].`, "system");
+                
+                // Update destination beacon
+                mapData.destination = [r, c];
+                const getCoords = (r, c) => {
+                    const x = (c - (cols - 1) / 2) * CELL_SIZE;
+                    const z = (r - (rows - 1) / 2) * CELL_SIZE;
+                    return { x, z };
+                };
+                const destPos = getCoords(r, c);
+                if (destMarker) destMarker.position.set(destPos.x, 0.05, destPos.z);
+                
+                // Update vertical light beam for destination (index 1 in obstacleMeshes is destBeam)
+                if (obstacleMeshes[1]) {
+                    obstacleMeshes[1].position.set(destPos.x, 2, destPos.z);
+                }
+                
+                // Run client-side BFS pathfinding from current robot position
+                const start = [robotGridPos.r, robotGridPos.c];
+                const end = [r, c];
+                
+                const path = bfsPathfinder(mapData.map_matrix, start, end);
+                if (!path) {
+                    logToTerminal(`No pathway found from current position [${start[0]}, ${start[1]}] to [${r}, ${c}].`, "error");
+                    drawPathway([]);
+                    populateCommandsList([]);
+                    return;
+                }
+                
+                logToTerminal(`Path calculated! Length: ${path.length} steps.`, "success");
+                
+                // Draw path in 3D
+                drawPathway(path);
+                
+                // Generate movement commands from path
+                const cmds = generateCommandsFromPath(path, robotFacingDegrees);
+                movementCommands = cmds;
+                
+                // Update commands list UI
+                populateCommandsList(cmds);
+                
+                // Update Hardware Export payload
+                updateHardwarePayload(path, cmds);
+                
+                // Auto-run the simulation
+                runAutonomousSimulation();
+            }
+        }
+    }
+}
+
+// Breadth-First Search client-side pathfinder
+function bfsPathfinder(grid, start, end) {
+    const rows = grid.length;
+    const cols = grid[0].length;
+    const queue = [[start]];
+    const visited = new Set([`${start[0]},${start[1]}`]);
+    const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1]]; // Up, Down, Left, Right
+    
+    while (queue.length > 0) {
+        const path = queue.shift();
+        const [r, c] = path[path.length - 1];
+        
+        if (r === end[0] && c === end[1]) {
+            return path;
+        }
+        
+        for (const [dr, dc] of dirs) {
+            const nr = r + dr;
+            const nc = c + dc;
+            if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+                if (grid[nr][nc] === 0 && !visited.has(`${nr},${nc}`)) {
+                    visited.add(`${nr},${nc}`);
+                    queue.push([...path, [nr, nc]]);
+                }
+            }
+        }
+    }
+    return null;
+}
+
+// Translates path coordinate sequence to precise step-by-step robot movement commands
+function generateCommandsFromPath(path, initialFacing = 0) {
+    const commands = [];
+    let currentFacing = initialFacing; // 0: N, 90: E, 180: S, 270: W
+    
+    let stepCount = 0;
+    
+    for (let i = 1; i < path.length; i++) {
+        const [r1, c1] = path[i-1];
+        const [r2, c2] = path[i];
+        
+        const dr = r2 - r1;
+        const dc = c2 - c1;
+        
+        let moveDir = 0;
+        if (dr === -1 && dc === 0) moveDir = 0;     // NORTH
+        else if (dr === 0 && dc === 1) moveDir = 90;  // EAST
+        else if (dr === 1 && dc === 0) moveDir = 180; // SOUTH
+        else if (dr === 0 && dc === -1) moveDir = 270; // WEST
+        
+        // Calculate rotation needed
+        let rotationDiff = (moveDir - currentFacing) % 360;
+        if (rotationDiff < 0) rotationDiff += 360;
+        
+        if (rotationDiff !== 0) {
+            // If we have accumulated forward steps, commit them
+            if (stepCount > 0) {
+                commands.push(`MOVE_FORWARD ${stepCount} UNITS`);
+                stepCount = 0;
+            }
+            
+            if (rotationDiff === 180) {
+                commands.push("ROTATE_CLOCKWISE 90");
+                commands.push("ROTATE_CLOCKWISE 90");
+            } else if (rotationDiff === 90) {
+                commands.push("ROTATE_CLOCKWISE 90");
+            } else if (rotationDiff === 270) {
+                commands.push("ROTATE_COUNTER_CLOCKWISE 90");
+            }
+            currentFacing = moveDir;
+        }
+        
+        stepCount++;
+    }
+    
+    if (stepCount > 0) {
+        commands.push(`MOVE_FORWARD ${stepCount} UNITS`);
+    }
+    
+    return commands;
+}
+
+// Draw a beautiful neon pathway line in Three.js
+function drawPathway(path) {
+    // Clear previous
+    pathwayPlates.forEach(plate => scene.remove(plate));
+    pathwayPlates = [];
+    
+    if (!path || path.length === 0) return;
+    
+    const [rows, cols] = mapData.grid_size;
+    const getCoords = (r, c) => {
+        const x = (c - (cols - 1) / 2) * CELL_SIZE;
+        const z = (r - (rows - 1) / 2) * CELL_SIZE;
+        return { x, z };
+    };
+    
+    // Draw a line connecting the path
+    const points = [];
+    path.forEach(coord => {
+        const pos = getCoords(coord[0], coord[1]);
+        points.push(new THREE.Vector3(pos.x, 0.05, pos.z));
+        
+        // Add a small glowing circular plate at each tile of the path
+        const plateGeo = new THREE.RingGeometry(0.18, 0.28, 16);
+        plateGeo.rotateX(-Math.PI / 2);
+        const plateMat = new THREE.MeshBasicMaterial({
+            color: 0x00d2ff,
+            transparent: true,
+            opacity: 0.65,
+            side: THREE.DoubleSide
+        });
+        const plate = new THREE.Mesh(plateGeo, plateMat);
+        plate.position.set(pos.x, 0.02, pos.z);
+        scene.add(plate);
+        pathwayPlates.push(plate);
+    });
+    
+    const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
+    const lineMat = new THREE.LineBasicMaterial({
+        color: 0x00d2ff,
+        transparent: true,
+        opacity: 0.85
+    });
+    const pathLine = new THREE.Line(lineGeo, lineMat);
+    scene.add(pathLine);
+    pathwayPlates.push(pathLine);
+}
+
+// Update the Hardware Integration Payload with metric coordinates
+function updateHardwarePayload(path, commands) {
+    const scale = parseFloat(document.getElementById("scale-input").value) || 0.5;
+    
+    // Scale commands for physical hardware
+    const hardwareCommands = commands.map(cmd => {
+        if (cmd.includes("MOVE_FORWARD")) {
+            const units = parseInt(cmd.match(/\d+/)[0]);
+            const meters = (units * scale).toFixed(2);
+            return `MOVE_FORWARD ${meters} METERS`;
+        }
+        return cmd;
+    });
+    
+    const payload = {
+        timestamp: new Date().toISOString(),
+        grid_scale_meters: scale,
+        start_position: mapData.start,
+        target_destination: mapData.destination,
+        coordinate_path: path,
+        movement_protocol: hardwareCommands
+    };
+    
+    // Enable the export button
+    const btnExport = document.getElementById("btn-export-payload");
+    if (btnExport) {
+        btnExport.disabled = false;
+        // Save payload globally so the modal can view it
+        window.hardwarePayload = payload;
+    }
+}
+

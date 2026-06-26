@@ -1,0 +1,16 @@
+# API Keys & Secrets
+.env
+
+# Python Caches & Builds
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# IDE settings
+.vscode/
+.idea/
+
+# Local Simulation Data
+map_data.json
+movement_commands.json

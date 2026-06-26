@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<!--
+ Copyright 2026 Google LLC
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spatial Robotics Autonomous 3D Arena</title>
+    <!-- Modern Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome for Icons with Subresource Integrity -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous">
+    <!-- Custom Style -->
+    <link rel="stylesheet" href="/static/style.css">
+    <!-- Three.js and OrbitControls with Subresource Integrity -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" integrity="sha384-CI3ELBVUz9XQO+97x6nwMDPosPR5XvsxW2ua7N1Xeygeh1IxtgqtCkGfQY9WWdHu" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js" integrity="sha384-wagZhIFgY4hD+7awjQjR4e2E294y6J2HSnd8eTNc15ZubTeQeVRZwhQJ+W6hnBsf" crossorigin="anonymous"></script>
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Header -->
+        <header class="main-header">
+            <div class="logo-area">
+                <i class="fa-solid fa-robot glowing-icon"></i>
+                <h1>SPATIAL<span>ROBOTICS</span></h1>
+            </div>
+            <div class="header-status">
+                <span id="ai-engine-badge" class="badge-engine badge-gemini"><i class="fa-solid fa-brain"></i> Engine: Gemini 2.5 Flash</span>
+            </div>
+            <div class="subtitle">AI Multi-Agent Orchestration & 3D Pathfinder</div>
+        </header>
+
+        <div class="main-layout">
+            <!-- Left Column: Controls & Agent Log -->
+            <aside class="sidebar-panel glass-card">
+                <div class="section-title">
+                    <i class="fa-solid fa-sliders"></i>
+                    <h2>Control Station</h2>
+                </div>
+
+                <!-- Secure API Key Input -->
+                <div class="control-group">
+                    <label for="sys-param-token"><i class="fa-solid fa-key"></i> Gemini API Key (Secure)</label>
+                    <div class="api-key-input-wrapper">
+                        <input type="password" id="sys-param-token" placeholder="Enter API key for cloud parsing (optional)..." class="api-key-input" autocomplete="off" spellcheck="false" />
+                        <span class="api-key-tooltip" title="Your API key is sent via secure headers and never stored. If left blank, local Ollama is used."><i class="fa-solid fa-circle-question"></i></span>
+                    </div>
+                </div>
+
+                <!-- Presets -->
+                <div class="control-group">
+                    <label>Layout Presets</label>
+                    <div class="preset-buttons">
+                        <button class="btn-preset active" data-preset="maze">Sofa Maze</button>
+                        <button class="btn-preset" data-preset="park">Fountain Park</button>
+                        <button class="btn-preset" data-preset="empty">Empty Grid</button>
+                        <button class="btn-preset" data-preset="custom">Custom Prompt</button>
+                    </div>
+                </div>
+
+                <!-- Multimodal File Upload -->
+                <div class="control-group">
+                    <label>Multimodal Scan (Photo / Video / Blueprint)</label>
+                    <div id="upload-zone" class="upload-zone">
+                        <i class="fa-solid fa-cloud-arrow-up upload-icon"></i>
+                        <div class="upload-text">Drag & drop or click to upload</div>
+                        <div class="upload-subtext">PNG, JPG, MP4, WEBM (Max 15MB)</div>
+                        <input type="file" id="file-input" accept="image/*,video/*" style="display: none;" />
+                    </div>
+                    <div id="file-preview-container" class="file-preview-container hidden">
+                        <div class="file-info">
+                            <i class="fa-solid fa-file-image preview-file-icon"></i>
+                            <span id="file-preview-name">room_photo.jpg</span>
+                        </div>
+                        <button type="button" id="btn-clear-file" class="btn-clear-file"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                </div>
+
+                <!-- Text Area Input -->
+                <div class="control-group">
+                    <label for="prompt-input">Refine / Customization Prompt</label>
+                    <textarea id="prompt-input" placeholder="Describe room layout, or type custom refinements for your uploaded scan (e.g. 'add couch at 3,3')..."></textarea>
+                </div>
+
+                <button id="btn-generate" class="btn-primary">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i> Generate 3D Map & Path
+                </button>
+
+                <!-- Agent Execution Terminal -->
+                <div class="terminal-section">
+                    <div class="terminal-header">
+                        <div class="dots">
+                            <span class="dot-red"></span>
+                            <span class="dot-yellow"></span>
+                            <span class="dot-green"></span>
+                        </div>
+                        <div class="terminal-title">Agent Execution Stream</div>
+                    </div>
+                    <div id="terminal-body" class="terminal-body">
+                        <div class="terminal-line system-line">System initialized. Awaiting spatial instructions...</div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Center/Right Column: 3D Simulation Arena -->
+            <main class="arena-panel glass-card">
+                <!-- Simulation Controls Overlay -->
+                <div class="arena-header">
+                    <div class="arena-title">
+                        <i class="fa-solid fa-cube"></i>
+                        <h3>3D Grid Arena Simulation</h3>
+                        <span id="click-mode-badge" class="badge-interactive"><i class="fa-solid fa-computer-mouse"></i> Click-to-Move Active</span>
+                    </div>
+                    <div class="simulation-actions">
+                        <div class="scale-input-group">
+                            <label for="scale-input"><i class="fa-solid fa-ruler"></i> Scale (m):</label>
+                            <input type="number" id="scale-input" value="0.5" min="0.1" step="0.1" class="scale-input" />
+                        </div>
+                        <button id="btn-export-payload" class="btn-sim-action" disabled>
+                            <i class="fa-solid fa-microchip"></i> Export Hardware
+                        </button>
+                        <button id="btn-play-sim" class="btn-sim-action" disabled>
+                            <i class="fa-solid fa-circle-play"></i> Run Autonomous Robot
+                        </button>
+                        <button id="btn-reset-sim" class="btn-sim-action" disabled>
+                            <i class="fa-solid fa-rotate-left"></i> Reset Arena
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Three.js Container -->
+                <div id="canvas-container" class="canvas-container">
+                    <!-- Glowing Active Command Overlay -->
+                    <div id="active-command-overlay" class="active-command-overlay hidden">
+                        <div class="pulse-indicator"></div>
+                        <div class="command-text">EXECUTING: <span id="current-command-span">MOVE_FORWARD 2 UNITS</span></div>
+                    </div>
+                    
+                    <!-- 3D Legend -->
+                    <div class="legend-overlay">
+                        <div class="legend-item"><span class="legend-color color-start"></span> Start</div>
+                        <div class="legend-item"><span class="legend-color color-dest"></span> Destination</div>
+                        <div class="legend-item"><span class="legend-color color-couch"></span> Couch</div>
+                        <div class="legend-item"><span class="legend-color color-wall"></span> Brick Wall</div>
+                        <div class="legend-item"><span class="legend-color color-fountain"></span> Fountain</div>
+                        <div class="legend-item"><span class="legend-color color-robot"></span> Robot Car</div>
+                    </div>
+                </div>
+
+                <!-- Bottom: Generated Movement Instructions -->
+                <div class="commands-section">
+                    <div class="commands-title">
+                        <i class="fa-solid fa-route"></i>
+                        <h4>AI Generated Movement Protocol</h4>
+                    </div>
+                    <div id="commands-list" class="commands-list">
+                        <div class="no-commands-message">No commands generated yet. Trigger the agent graph above to calculate pathfinding.</div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Hardware Payload Modal -->
+    <div id="payload-modal" class="modal-overlay hidden">
+        <div class="modal-content glass-card">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-microchip"></i> Hardware Integration Payload</h3>
+                <button id="btn-close-modal" class="btn-close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <p>Use this JSON payload to stream path coordinates and metric commands to your hardware robot controller (e.g., Raspberry Pi, ROS, or Arduino).</p>
+                <div class="code-container">
+                    <pre><code id="payload-code-block">{}</code></pre>
+                </div>
+                <div class="modal-footer">
+                    <button id="btn-copy-payload" class="btn-primary"><i class="fa-solid fa-copy"></i> Copy JSON</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- App Logic -->
+    <script src="/static/app.js"></script>
+</body>
+</html>
