@@ -591,6 +591,17 @@ def read_root():
         logger.error(f"Failed to read index.html: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/supabase-config")
+def get_supabase_config():
+    """
+    Exposes the public Supabase URL and anon public key to the frontend.
+    These are public credentials designed for client-side SDK use.
+    """
+    return {
+        "supabase_url": os.environ.get("SUPABASE_URL", ""),
+        "supabase_anon_key": os.environ.get("SUPABASE_ANON_KEY", "")
+    }
+
 # ============================================================================
 # MULTI-PROJECT WORKSPACE PERSISTENT APIS
 # ============================================================================
@@ -599,12 +610,61 @@ PROJECTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "project
 if not os.path.exists(PROJECTS_DIR):
     os.makedirs(PROJECTS_DIR)
 
-def get_safe_project_path(project_name: str) -> str:
-    """Returns a sanitized absolute path for a project, preventing path traversal."""
-    sanitized = re.sub(r"[^a-zA-Z0-9_\-]", "", project_name)
-    if not sanitized:
+def verify_supabase_token(token: str) -> dict:
+    """Verifies a Supabase JWT token by calling the Supabase Auth server."""
+    supabase_url = os.environ.get("SUPABASE_URL")
+    if not supabase_url:
+        # Fallback to local developer account in development/anonymous mode
+        logger.warning("SUPABASE_URL not configured. Running in local fallback mode.")
+        return {"id": "local-dev-id", "email": "local-dev-user@example.com"}
+        
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "apikey": os.environ.get("SUPABASE_ANON_KEY", "")
+    }
+    try:
+        with httpx.Client() as client:
+            response = client.get(f"{supabase_url}/auth/v1/user", headers=headers, timeout=5.0)
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.warning(f"Supabase auth token validation failed: {response.status_code} - {response.text}")
+                raise HTTPException(status_code=401, detail="Invalid session token.")
+    except httpx.HTTPError as e:
+        logger.error(f"Supabase auth server request failed: {str(e)}")
+        raise HTTPException(status_code=401, detail="Authentication server unavailable.")
+    except Exception as e:
+        logger.error(f"Supabase verification unexpected error: {str(e)}")
+        raise HTTPException(status_code=401, detail="Session verification failed.")
+
+def get_username_from_user(user: dict) -> str:
+    """Derives a safe username folder name from the user email or id."""
+    email = user.get("email", "")
+    if email:
+        username = email.split("@")[0]
+    else:
+        username = user.get("id", "anonymous")
+    username = re.sub(r"[^a-zA-Z0-9_\-\.]", "", username)
+    if not username:
+        username = "anonymous"
+    return username
+
+def get_safe_project_path(project_name: str, username: Optional[str] = None) -> str:
+    """Returns a sanitized absolute path for a project, sandboxed to a user if authenticated."""
+    sanitized_proj = re.sub(r"[^a-zA-Z0-9_\-]", "", project_name)
+    if not sanitized_proj:
         raise HTTPException(status_code=400, detail="Invalid project name.")
-    return os.path.join(PROJECTS_DIR, sanitized)
+        
+    if username:
+        sanitized_user = re.sub(r"[^a-zA-Z0-9_\-\.]", "", username)
+        if not sanitized_user:
+            raise HTTPException(status_code=400, detail="Invalid username.")
+        user_dir = os.path.join(PROJECTS_DIR, sanitized_user)
+        if not os.path.exists(user_dir):
+            os.makedirs(user_dir)
+        return os.path.join(user_dir, sanitized_proj)
+        
+    return os.path.join(PROJECTS_DIR, sanitized_proj)
 
 def get_safe_filepath(base_dir: str, filename: str) -> str:
     """Returns a sanitized path for a file inside a directory, preventing traversal."""
@@ -696,13 +756,23 @@ def find_path_and_commands(map_data: dict) -> dict:
     }
 
 @app.get("/api/projects")
-def list_projects():
-    if not os.path.exists(PROJECTS_DIR):
+def list_projects(authorization: Optional[str] = Header(None)):
+    username = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ")[1]
+        try:
+            user = verify_supabase_token(token)
+            username = get_username_from_user(user)
+        except Exception:
+            pass
+            
+    base_dir = os.path.join(PROJECTS_DIR, username) if username else PROJECTS_DIR
+    if not os.path.exists(base_dir):
         return []
     projects = []
-    for name in os.listdir(PROJECTS_DIR):
-        p_path = os.path.join(PROJECTS_DIR, name)
-        if os.path.isdir(p_path):
+    for name in os.listdir(base_dir):
+        p_path = os.path.join(base_dir, name)
+        if os.path.isdir(p_path) and name not in ("assets", "maps"):
             projects.append(name)
     return sorted(projects)
 
@@ -710,8 +780,17 @@ class CreateProjectRequest(BaseModel):
     name: str
 
 @app.post("/api/projects/create")
-def create_project(req: CreateProjectRequest):
-    p_path = get_safe_project_path(req.name)
+def create_project(req: CreateProjectRequest, authorization: Optional[str] = Header(None)):
+    username = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ")[1]
+        try:
+            user = verify_supabase_token(token)
+            username = get_username_from_user(user)
+        except Exception:
+            pass
+            
+    p_path = get_safe_project_path(req.name, username)
     if os.path.exists(p_path):
         raise HTTPException(status_code=400, detail="Project already exists.")
     os.makedirs(p_path)
@@ -720,8 +799,17 @@ def create_project(req: CreateProjectRequest):
     return {"status": "success", "message": f"Project '{req.name}' created."}
 
 @app.get("/api/projects/{project_name}/assets")
-def list_assets(project_name: str):
-    p_path = get_safe_project_path(project_name)
+def list_assets(project_name: str, authorization: Optional[str] = Header(None)):
+    username = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ")[1]
+        try:
+            user = verify_supabase_token(token)
+            username = get_username_from_user(user)
+        except Exception:
+            pass
+            
+    p_path = get_safe_project_path(project_name, username)
     assets_dir = os.path.join(p_path, "assets")
     if not os.path.exists(assets_dir):
         return []
@@ -736,8 +824,17 @@ def list_assets(project_name: str):
     return assets
 
 @app.post("/api/projects/{project_name}/assets/upload")
-async def upload_assets(project_name: str, files: list[UploadFile] = File(...)):
-    p_path = get_safe_project_path(project_name)
+async def upload_assets(project_name: str, authorization: Optional[str] = Header(None), files: list[UploadFile] = File(...)):
+    username = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ")[1]
+        try:
+            user = verify_supabase_token(token)
+            username = get_username_from_user(user)
+        except Exception:
+            pass
+            
+    p_path = get_safe_project_path(project_name, username)
     assets_dir = os.path.join(p_path, "assets")
     if not os.path.exists(assets_dir):
         os.makedirs(assets_dir)
@@ -755,6 +852,10 @@ async def upload_assets(project_name: str, files: list[UploadFile] = File(...)):
             raise HTTPException(status_code=400, detail=f"Unsupported file type for {file.filename}. Only images, videos, and PDFs are allowed.")
         
         content = await file.read()
+        # Security: validate file size on upload (max 20MB)
+        if len(content) > 20 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail=f"File size for {file.filename} exceeds the 20MB limit.")
+            
         with open(safe_path, "wb") as f:
             f.write(content)
         uploaded.append(os.path.basename(safe_path))
@@ -762,8 +863,17 @@ async def upload_assets(project_name: str, files: list[UploadFile] = File(...)):
     return {"status": "success", "uploaded": uploaded}
 
 @app.delete("/api/projects/{project_name}/assets/{filename}")
-def delete_asset(project_name: str, filename: str):
-    p_path = get_safe_project_path(project_name)
+def delete_asset(project_name: str, filename: str, authorization: Optional[str] = Header(None)):
+    username = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ")[1]
+        try:
+            user = verify_supabase_token(token)
+            username = get_username_from_user(user)
+        except Exception:
+            pass
+            
+    p_path = get_safe_project_path(project_name, username)
     assets_dir = os.path.join(p_path, "assets")
     safe_path = get_safe_filepath(assets_dir, filename)
     if os.path.exists(safe_path):
@@ -772,8 +882,16 @@ def delete_asset(project_name: str, filename: str):
     raise HTTPException(status_code=404, detail="Asset not found.")
 
 @app.get("/api/projects/{project_name}/maps")
-def list_maps(project_name: str):
-    p_path = get_safe_project_path(project_name)
+def list_maps(project_name: str, authorization: Optional[str] = Header(None)):
+    username = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ")[1]
+        try:
+            user = verify_supabase_token(token)
+            username = get_username_from_user(user)
+        except Exception:
+            pass
+    p_path = get_safe_project_path(project_name, username)
     maps_dir = os.path.join(p_path, "maps")
     if not os.path.exists(maps_dir):
         return []
@@ -788,8 +906,16 @@ class CreateMapRequest(BaseModel):
     name: str
 
 @app.post("/api/projects/{project_name}/maps/create")
-def create_map(project_name: str, req: CreateMapRequest):
-    p_path = get_safe_project_path(project_name)
+def create_map(project_name: str, req: CreateMapRequest, authorization: Optional[str] = Header(None)):
+    username = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ")[1]
+        try:
+            user = verify_supabase_token(token)
+            username = get_username_from_user(user)
+        except Exception:
+            pass
+    p_path = get_safe_project_path(project_name, username)
     maps_dir = os.path.join(p_path, "maps")
     if not os.path.exists(maps_dir):
         os.makedirs(maps_dir)
@@ -828,8 +954,16 @@ def create_map(project_name: str, req: CreateMapRequest):
     return {"status": "success", "message": f"Map '{req.name}' created."}
 
 @app.get("/api/projects/{project_name}/maps/{map_name}")
-def get_map_details(project_name: str, map_name: str):
-    p_path = get_safe_project_path(project_name)
+def get_map_details(project_name: str, map_name: str, authorization: Optional[str] = Header(None)):
+    username = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ")[1]
+        try:
+            user = verify_supabase_token(token)
+            username = get_username_from_user(user)
+        except Exception:
+            pass
+    p_path = get_safe_project_path(project_name, username)
     maps_dir = os.path.join(p_path, "maps")
     
     safe_map_name = re.sub(r"[^a-zA-Z0-9_\-]", "", map_name)
@@ -872,8 +1006,16 @@ class UpdateConfigRequest(BaseModel):
     use_project_assets: bool
 
 @app.post("/api/projects/{project_name}/maps/{map_name}/config")
-def update_map_config(project_name: str, map_name: str, req: UpdateConfigRequest):
-    p_path = get_safe_project_path(project_name)
+def update_map_config(project_name: str, map_name: str, req: UpdateConfigRequest, authorization: Optional[str] = Header(None)):
+    username = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ")[1]
+        try:
+            user = verify_supabase_token(token)
+            username = get_username_from_user(user)
+        except Exception:
+            pass
+    p_path = get_safe_project_path(project_name, username)
     maps_dir = os.path.join(p_path, "maps")
     
     safe_map_name = re.sub(r"[^a-zA-Z0-9_\-]", "", map_name)
@@ -891,10 +1033,126 @@ def update_map_config(project_name: str, map_name: str, req: UpdateConfigRequest
         
     return {"status": "success", "config": config}
 
+class SaveMapRequest(BaseModel):
+    grid_size: list[int]
+    start: list[int]
+    destination: list[int]
+    obstacles: list[dict]
+    map_matrix: list[list[int]]
+    commands: list[str]
+
+@app.post("/api/projects/{project_name}/maps/{map_name}/save")
+def save_project_map(
+    project_name: str,
+    map_name: str,
+    req: SaveMapRequest,
+    authorization: Optional[str] = Header(None)
+):
+    username = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ")[1]
+        try:
+            user = verify_supabase_token(token)
+            username = get_username_from_user(user)
+        except Exception:
+            pass
+            
+    p_path = get_safe_project_path(project_name, username)
+    maps_dir = os.path.join(p_path, "maps")
+    
+    safe_map_name = re.sub(r"[^a-zA-Z0-9_\-]", "", map_name)
+    map_file = os.path.join(maps_dir, f"{safe_map_name}.json")
+    commands_file = os.path.join(maps_dir, f"{safe_map_name}_cmds.json")
+    
+    if not os.path.exists(maps_dir):
+        os.makedirs(maps_dir)
+        
+    map_data = {
+        "grid_size": req.grid_size,
+        "start": req.start,
+        "destination": req.destination,
+        "obstacles": req.obstacles,
+        "map_matrix": req.map_matrix
+    }
+    
+    try:
+        with open(map_file, "w") as f:
+            json.dump(map_data, f, indent=2)
+            
+        with open(commands_file, "w") as f:
+            json.dump({"commands": req.commands}, f, indent=2)
+    except Exception as e:
+        logger.error(f"Failed to save map file: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to save map layout to disk.")
+        
+    return {"status": "success", "message": "Map layout and commands saved successfully."}
+
+
+@app.post("/api/projects/{project_name}/maps/import")
+async def import_project_map(
+    project_name: str,
+    authorization: Optional[str] = Header(None),
+    file: UploadFile = File(...)
+):
+    """
+    Imports a map JSON file from the computer and saves it to the user's project workspace.
+    """
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or malformed Authorization header.")
+    token = authorization.split(" ")[1]
+    user = verify_supabase_token(token)
+    username = get_username_from_user(user)
+    
+    # Security: validate file size (max 2MB for map JSON)
+    content = await file.read()
+    if len(content) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Map JSON exceeds 2MB size limit.")
+        
+    try:
+        map_data = json.loads(content.decode("utf-8"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON file format.")
+        
+    # Validate map schema
+    if not isinstance(map_data, dict) or "grid_size" not in map_data or "map_matrix" not in map_data:
+        raise HTTPException(status_code=400, detail="Invalid map layout schema. Must contain 'grid_size' and 'map_matrix'.")
+        
+    # Sanitize map name
+    filename = file.filename or "imported_map.json"
+    map_name = os.path.splitext(os.path.basename(filename))[0]
+    safe_map_name = re.sub(r"[^a-zA-Z0-9_\-]", "", map_name)
+    if not safe_map_name:
+        safe_map_name = "imported"
+        
+    p_path = get_safe_project_path(project_name, username)
+    maps_dir = os.path.join(p_path, "maps")
+    if not os.path.exists(maps_dir):
+        os.makedirs(maps_dir)
+        
+    map_file = os.path.join(maps_dir, f"{safe_map_name}.json")
+    commands_file = os.path.join(maps_dir, f"{safe_map_name}_cmds.json")
+    
+    # Save locally
+    with open(map_file, "w") as f:
+        json.dump(map_data, f, indent=2)
+        
+    # Pre-calculate path
+    path_info = find_path_and_commands(map_data)
+    with open(commands_file, "w") as f:
+        json.dump({"commands": path_info["commands"]}, f, indent=2)
+        
+    return {
+        "status": "success",
+        "map_name": safe_map_name,
+        "map": map_data,
+        "commands": {"commands": path_info["commands"]}
+    }
+
 @app.post("/api/projects/{project_name}/maps/{map_name}/generate")
 async def generate_project_map(
     project_name: str,
     map_name: str,
+    authorization: Optional[str] = Header(None),
     files: Optional[list[UploadFile]] = File(None),
     custom_prompt: Optional[str] = Form(None),
     x_gemini_api_key: Optional[str] = Header(None)
@@ -903,22 +1161,47 @@ async def generate_project_map(
     Core generator endpoint. Parses multiple uploaded files (up to 10) and prompt.
     Includes project assets context if enabled, and generates the map and path commands.
     """
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or malformed Authorization header.")
+    token = authorization.split(" ")[1]
+    user = verify_supabase_token(token)
+    username = get_username_from_user(user)
+    
     safe_map_name = re.sub(r"[^a-zA-Z0-9_\-]", "", map_name)
     safe_project_name = re.sub(r"[^a-zA-Z0-9_\-]", "", project_name)
-    logger.info(f"Generating map '{safe_map_name}' for project '{safe_project_name}'...")
+    logger.info(f"Generating map '{safe_map_name}' for project '{safe_project_name}' for user '{username}'...")
     
     # Validation
-    p_path = get_safe_project_path(project_name)
+    p_path = get_safe_project_path(project_name, username)
     maps_dir = os.path.join(p_path, "maps")
     assets_dir = os.path.join(p_path, "assets")
     
+    if not os.path.exists(maps_dir):
+        os.makedirs(maps_dir)
+        
     map_file = os.path.join(maps_dir, f"{safe_map_name}.json")
     config_file = os.path.join(maps_dir, f"{safe_map_name}_config.json")
     commands_file = os.path.join(maps_dir, f"{safe_map_name}_cmds.json")
     
+    # Auto-initialize empty map if it doesn't exist yet
     if not os.path.exists(map_file):
-        raise HTTPException(status_code=404, detail="Map not found.")
-        
+        empty_map = {
+            "grid_size": [6, 6],
+            "start": [0, 0],
+            "destination": [5, 5],
+            "obstacles": [],
+            "map_matrix": [
+                [0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0]
+            ]
+        }
+        with open(map_file, "w") as f:
+            json.dump(empty_map, f, indent=2)
+            
     if x_gemini_api_key:
         if not validate_api_key(x_gemini_api_key):
             raise HTTPException(status_code=400, detail="Invalid API Key format.")

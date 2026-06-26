@@ -29,195 +29,294 @@
     <!-- Three.js and OrbitControls with Subresource Integrity -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" integrity="sha384-CI3ELBVUz9XQO+97x6nwMDPosPR5XvsxW2ua7N1Xeygeh1IxtgqtCkGfQY9WWdHu" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js" integrity="sha384-wagZhIFgY4hD+7awjQjR4e2E294y6J2HSnd8eTNc15ZubTeQeVRZwhQJ+W6hnBsf" crossorigin="anonymous"></script>
+    <!-- Supabase JS Client [NEW] -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
-    <div class="dashboard-container">
-        <!-- Header -->
-        <header class="main-header">
-            <div class="logo-area">
-                <i class="fa-solid fa-robot glowing-icon"></i>
-                <h1>SPATIAL<span>ROBOTICS</span></h1>
-            </div>
-            <div class="header-status">
-                <span id="ai-engine-badge" class="badge-engine badge-gemini"><i class="fa-solid fa-brain"></i> Engine: Gemini 2.5 Flash</span>
-            </div>
-            <div class="subtitle">AI Multi-Agent Orchestration & 3D Pathfinder</div>
-        </header>
-
-        <div class="main-layout">
-            <!-- Left Column: Controls & Agent Log -->
-            <aside class="sidebar-panel glass-card">
-                <div class="section-title">
-                    <i class="fa-solid fa-sliders"></i>
-                    <h2>Control Station</h2>
+    <!-- SaaS Welcome Landing & Auth Portal [NEW] -->
+    <div id="login-page">
+        <div class="landing-portal-wrapper">
+            <!-- Left Pane: Platform Overview -->
+            <div class="portal-left-pane">
+                <div class="portal-brand">
+                    <i class="fa-solid fa-robot brand-glowing-icon"></i>
+                    <h2>SPATIAL<span>ROBOTICS</span></h2>
                 </div>
+                <div class="portal-tagline">Autonomous 3D Arena & Multi-Agent Pathfinding</div>
+                <div class="portal-description">
+                    Welcome to the ultimate spatial computing simulation workspace. Designed as an advanced robotics capstone project for the Kaggle 5-Day Learning Session powered by Google, this platform leverages state-of-the-art AI to translate human spaces into physical machine intelligence.
+                </div>
+                <div class="portal-features-list">
+                    <div class="portal-feature-item">
+                        <i class="fa-solid fa-network-wired feature-icon"></i>
+                        <div class="feature-info">
+                            <h4>Google ADK Orchestration</h4>
+                            <p>Multi-agent graphs coordinates vision scanners and local pathfinders seamlessly.</p>
+                        </div>
+                    </div>
+                    <div class="portal-feature-item">
+                        <i class="fa-solid fa-cube feature-icon"></i>
+                        <div class="feature-info">
+                            <h4>High-Fidelity 3D Simulation</h4>
+                            <p>Interact with responsive 3D assets, wheel locomotion, and water particle physics.</p>
+                        </div>
+                    </div>
+                    <div class="portal-feature-item">
+                        <i class="fa-solid fa-shield-halved feature-icon"></i>
+                        <div class="feature-info">
+                            <h4>Zero-Storage Secure RLS</h4>
+                            <p>Row-Level database encryption, sandboxed workspaces, and secure session credentials.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="portal-footer-credits">
+                    Google Kaggle Learning Session &copy; 2026. Capstone Project.
+                </div>
+            </div>
 
-                <!-- Secure API Key Input -->
-                <div class="control-group">
-                    <label for="sys-param-token"><i class="fa-solid fa-key"></i> Gemini API Key (Secure)</label>
-                    <div class="api-key-input-wrapper">
-                        <input type="password" id="sys-param-token" placeholder="Enter API key for cloud parsing (optional)..." class="api-key-input" autocomplete="off" spellcheck="false" />
-                        <span class="api-key-tooltip" title="Your API key is sent via secure headers and never stored. If left blank, local Ollama is used."><i class="fa-solid fa-circle-question"></i></span>
+            <!-- Right Pane: Auth Forms -->
+            <div class="portal-right-pane">
+                <div class="auth-card glass-card">
+                    <div class="auth-tabs">
+                        <button id="tab-login" class="auth-tab active" data-view="login">Sign In</button>
+                        <button id="tab-register" class="auth-tab" data-view="register">Register</button>
                     </div>
                     
+                    <div class="auth-form-body">
+                        <h4 id="auth-title">Welcome Back</h4>
+                        <p id="auth-subtitle" class="auth-subtitle-text">Sign in to access your secure persistent workspaces.</p>
+                        
+                        <form id="auth-form" autocomplete="off">
+                            <div class="auth-input-group">
+                                <label for="auth-email"><i class="fa-solid fa-envelope"></i> Email Address</label>
+                                <input type="email" id="auth-email" placeholder="Enter your email..." required autocomplete="email" />
+                            </div>
+                            
+                            <div class="auth-input-group">
+                                <label for="auth-password"><i class="fa-solid fa-lock"></i> Password</label>
+                                <input type="password" id="auth-password" placeholder="Enter your password..." required autocomplete="current-password" />
+                            </div>
+                            
+                            <!-- Custom Supabase Settings Expandable -->
+                            <div class="custom-db-settings-wrapper">
+                                <button type="button" id="btn-toggle-db-config" class="btn-text-link">
+                                    <i class="fa-solid fa-gears"></i> Custom Supabase Config (Optional)
+                                </button>
+                                <div id="custom-db-fields" class="custom-db-fields hidden">
+                                    <div class="auth-input-group mt-8">
+                                        <label for="db-url"><i class="fa-solid fa-link"></i> Supabase Project URL</label>
+                                        <input type="url" id="db-url" placeholder="https://your-project-id.supabase.co..." />
+                                    </div>
+                                    <div class="auth-input-group mt-8">
+                                        <label for="db-key"><i class="fa-solid fa-key"></i> Anon Public Key</label>
+                                        <input type="text" id="db-key" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." />
+                                    </div>
+                                    <div class="db-config-help">
+                                        Leave blank to use the server's default cloud database configuration.
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <button type="submit" id="btn-auth-submit" class="btn-primary auth-submit-btn">
+                                <i class="fa-solid fa-right-to-bracket"></i> Sign In
+                            </button>
+                        </form>
+                    </div>
                 </div>
+            </div>
+        </div>
+    </div>
 
-                <!-- Workspace Manager [NEW] -->
-                <div class="workspace-section glass-subcard">
+    <!-- Dashboard Page Wrapper [NEW] -->
+    <div id="dashboard-page" class="hidden">
+        <div class="dashboard-container">
+            <!-- Header -->
+            <header class="main-header">
+                <div class="logo-area">
+                    <i class="fa-solid fa-robot glowing-icon"></i>
+                    <h1>SPATIAL<span>ROBOTICS</span></h1>
+                </div>
+                
+                <!-- User Profile & Logout Badge [NEW] -->
+                <div class="user-profile-badge">
+                    <div class="user-info">
+                        <span class="user-icon"><i class="fa-solid fa-circle-user"></i></span>
+                        <span id="user-email-display" class="user-email">loading...</span>
+                    </div>
+                    <button id="btn-logout" class="btn-logout" title="Log Out"><i class="fa-solid fa-right-from-bracket"></i></button>
+                </div>
+            </header>
+
+            <div class="dashboard-layout">
+                <!-- Left Sidebar: Controls & Scans -->
+                <aside class="dashboard-sidebar glass-card">
+                    <div class="section-title">
+                        <i class="fa-solid fa-sliders"></i>
+                        <h2>Control Station</h2>
+                    </div>
+
+                    <!-- Secure API Key Input -->
                     <div class="control-group">
-                        <label><i class="fa-solid fa-folder-tree"></i> Project Workspace</label>
-                        <div class="project-selector-row">
-                            <select id="project-select" class="project-select">
-                                <option value="">-- Select Project --</option>
-                            </select>
-                            <button id="btn-new-project" class="btn-icon" title="Create New Project"><i class="fa-solid fa-folder-plus"></i></button>
+                        <label for="sys-param-token"><i class="fa-solid fa-key"></i> Gemini API Key (Secure)</label>
+                        <div class="api-key-input-wrapper">
+                            <input type="password" id="sys-param-token" placeholder="Enter API key for cloud parsing (optional)..." class="api-key-input" autocomplete="off" spellcheck="false" />
+                            <span class="api-key-tooltip" title="Your API key is sent via secure headers and never stored. If left blank, local Ollama is used."><i class="fa-solid fa-circle-question"></i></span>
                         </div>
                     </div>
 
-                    <!-- Active Project Sub-panel -->
-                    <div id="project-subpanel" class="project-subpanel hidden">
-                        <!-- Project Reference Assets -->
-                        <div class="control-group mt-12">
-                            <div class="sub-section-header">
-                                <label><i class="fa-solid fa-photo-film"></i> Reference Assets (<span id="asset-count">0</span>/20)</label>
-                                <button id="btn-upload-assets" class="btn-icon-sub" title="Upload Project Assets"><i class="fa-solid fa-plus"></i></button>
-                                <input type="file" id="asset-file-input" multiple accept="image/*,video/*,application/pdf" style="display:none;" />
-                            </div>
-                            <div id="project-assets-list" class="project-assets-list">
-                                <div class="no-assets-message">No reference assets uploaded yet.</div>
+                    <!-- Workspace Manager -->
+                    <div class="workspace-section glass-subcard">
+                        <div class="control-group">
+                            <label><i class="fa-solid fa-folder-tree"></i> Project Workspace</label>
+                            <div class="project-selector-row">
+                                <select id="project-select" class="project-select">
+                                    <option value="">-- Select Project --</option>
+                                </select>
+                                <button id="btn-new-project" class="btn-icon" title="Create New Project"><i class="fa-solid fa-folder-plus"></i></button>
                             </div>
                         </div>
 
-                        <!-- Project Maps -->
-                        <div class="control-group mt-12">
-                            <div class="sub-section-header">
-                                <label><i class="fa-solid fa-map-location-dot"></i> Workspace Maps</label>
-                                <button id="btn-new-map" class="btn-icon-sub" title="Create New Map"><i class="fa-solid fa-plus"></i></button>
+                        <!-- Active Project Sub-panel -->
+                        <div id="project-subpanel" class="project-subpanel hidden">
+                            <!-- Project Reference Assets -->
+                            <div class="control-group mt-12">
+                                <div class="sub-section-header">
+                                    <label><i class="fa-solid fa-photo-film"></i> Reference Assets (<span id="asset-count">0</span>/20)</label>
+                                    <button id="btn-upload-assets" class="btn-icon-sub" title="Upload Project Assets"><i class="fa-solid fa-plus"></i></button>
+                                    <input type="file" id="asset-file-input" multiple accept="image/*,video/*,application/pdf" style="display:none;" />
+                                </div>
+                                <div id="project-assets-list" class="project-assets-list">
+                                    <div class="no-assets-message">No reference assets uploaded yet.</div>
+                                </div>
                             </div>
-                            <div id="project-maps-list" class="project-maps-list">
-                                <div class="no-maps-message">No maps created yet.</div>
+
+                            <!-- Project Maps -->
+                            <div class="control-group mt-12">
+                                <div class="sub-section-header">
+                                    <label><i class="fa-solid fa-map-location-dot"></i> Workspace Maps</label>
+                                    <div class="map-actions-wrapper">
+                                        <button id="btn-import-map" class="btn-icon-sub" title="Import Map JSON"><i class="fa-solid fa-file-import"></i></button>
+                                        <button id="btn-new-map" class="btn-icon-sub" title="Create New Map"><i class="fa-solid fa-plus"></i></button>
+                                    </div>
+                                    <input type="file" id="import-map-input" accept=".json" style="display:none;" />
+                                </div>
+                                <div id="project-maps-list" class="project-maps-list">
+                                    <div class="no-maps-message">No maps created yet.</div>
+                                </div>
                             </div>
+                            
+                            <!-- Map Reference Switch & Export -->
+                            <div id="map-config-subpanel" class="map-config-subpanel mt-12 hidden">
+                                <div class="toggle-control-group">
+                                    <span>Use Project Reference Assets</span>
+                                    <label class="switch">
+                                        <input type="checkbox" id="toggle-use-assets" checked>
+                                        <span class="slider round"></span>
+                                    </label>
+                                </div>
+                                <button id="btn-export-map" class="btn-secondary-glow mt-8" style="width: 100%;">
+                                    <i class="fa-solid fa-file-export"></i> Export Active Map
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Presets -->
+                    <div class="control-group">
+                        <label>Layout Presets</label>
+                        <div class="preset-buttons">
+                            <button class="btn-preset active" data-preset="maze">Sofa Maze</button>
+                            <button class="btn-preset" data-preset="park">Fountain Park</button>
+                            <button class="btn-preset" data-preset="empty">Empty Grid</button>
+                            <button class="btn-preset" data-preset="custom">Custom Prompt</button>
+                        </div>
+                    </div>
+
+                    <!-- Multimodal Staged Files Upload -->
+                    <div class="control-group">
+                        <label><i class="fa-solid fa-layer-group"></i> Stage Scan Files (<span id="staged-count">0</span>/10)</label>
+                        <div id="staged-files-container" class="staged-files-container hidden">
+                            <div id="staged-files-grid" class="staged-files-grid"></div>
+                        </div>
+                        <div id="upload-zone" class="upload-zone compact-zone">
+                            <i class="fa-solid fa-plus upload-icon-small"></i>
+                            <div class="upload-text-small">Click or drag files to stage</div>
+                            <input type="file" id="file-input" multiple accept="image/*,video/*,application/pdf" style="display: none;" />
+                        </div>
+                    </div>
+
+                    <!-- Text Area Input -->
+                    <div class="control-group">
+                        <label for="prompt-input">Refine / Customization Prompt</label>
+                        <textarea id="prompt-input" placeholder="Describe room layout, or type custom refinements for your uploaded scan (e.g. 'add couch at 3,3')..."></textarea>
+                    </div>
+
+                    <button id="btn-generate" class="btn-primary">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i> Generate 3D Map & Path
+                    </button>
+
+                    <!-- Agent Execution Terminal -->
+                    <div class="terminal-section">
+                        <div class="terminal-header">
+                            <div class="terminal-title"><i class="fa-solid fa-terminal"></i> Terminal Logs</div>
+                            <div id="ai-engine-badge" class="badge-engine badge-gemini">
+                                <i class="fa-solid fa-brain"></i> Engine: Gemini 2.5 Flash
+                            </div>
+                        </div>
+                        <div id="terminal-body" class="terminal-body">
+                            <div class="terminal-line system-line">System Status: Waiting for instruction...</div>
+                        </div>
+                    </div>
+                </aside>
+
+                <!-- Right Pane: 3D Arena and Locomotion Commands -->
+                <main class="dashboard-main-area">
+                    <!-- Top Scale & Hardware Control Bar -->
+                    <div class="top-control-bar glass-card">
+                        <div class="control-item">
+                            <label for="scale-input"><i class="fa-solid fa-ruler-combined"></i> Grid Scale (Meters/Cell):</label>
+                            <input type="number" id="scale-input" value="0.5" step="0.1" min="0.1" class="scale-input" />
+                        </div>
+                        <div class="playback-controls">
+                            <button id="btn-play-sim" class="btn-control btn-play" disabled><i class="fa-solid fa-play"></i> Play Mission</button>
+                            <button id="btn-reset-sim" class="btn-control btn-reset" disabled><i class="fa-solid fa-arrow-rotate-left"></i> Reset</button>
+                        </div>
+                        <button id="btn-export-payload" class="btn-primary" disabled>
+                            <i class="fa-solid fa-file-export"></i> Export Hardware
+                        </button>
+                    </div>
+
+                    <!-- Three.js Container -->
+                    <div id="canvas-container" class="canvas-container">
+                        <!-- Glowing Active Command Overlay -->
+                        <div id="active-command-overlay" class="active-command-overlay hidden">
+                            <div class="pulse-indicator"></div>
+                            <div class="command-text">EXECUTING: <span id="current-command-span">MOVE_FORWARD 2 UNITS</span></div>
                         </div>
                         
-                        <!-- Map Reference Switch -->
-                        <div id="map-config-subpanel" class="map-config-subpanel mt-12 hidden">
-                            <div class="toggle-control-group">
-                                <span>Use Project Reference Assets</span>
-                                <label class="switch">
-                                    <input type="checkbox" id="toggle-use-assets" checked>
-                                    <span class="slider round"></span>
-                                </label>
-                            </div>
+                        <!-- 3D Legend -->
+                        <div class="legend-overlay">
+                            <div class="legend-item"><span class="legend-color color-start"></span> Start</div>
+                            <div class="legend-item"><span class="legend-color color-dest"></span> Destination</div>
+                            <div class="legend-item"><span class="legend-color color-couch"></span> Couch</div>
+                            <div class="legend-item"><span class="legend-color color-wall"></span> Brick Wall</div>
+                            <div class="legend-item"><span class="legend-color color-fountain"></span> Fountain</div>
+                            <div class="legend-item"><span class="legend-color color-robot"></span> Robot Car</div>
                         </div>
                     </div>
-                </div>
 
-                <!-- Presets -->
-                <div class="control-group">
-                    <label>Layout Presets</label>
-                    <div class="preset-buttons">
-                        <button class="btn-preset active" data-preset="maze">Sofa Maze</button>
-                        <button class="btn-preset" data-preset="park">Fountain Park</button>
-                        <button class="btn-preset" data-preset="empty">Empty Grid</button>
-                        <button class="btn-preset" data-preset="custom">Custom Prompt</button>
-                    </div>
-                </div>
-
-                <!-- Multimodal Staged Files Upload [NEW] -->
-                <div class="control-group">
-                    <label><i class="fa-solid fa-layer-group"></i> Stage Scan Files (<span id="staged-count">0</span>/10)</label>
-                    <div id="staged-files-container" class="staged-files-container hidden">
-                        <div id="staged-files-grid" class="staged-files-grid"></div>
-                    </div>
-                    <div id="upload-zone" class="upload-zone compact-zone">
-                        <i class="fa-solid fa-plus upload-icon-small"></i>
-                        <div class="upload-text-small">Click or drag files to stage</div>
-                        <input type="file" id="file-input" multiple accept="image/*,video/*,application/pdf" style="display: none;" />
-                    </div>
-                </div>
-
-                <!-- Text Area Input -->
-                <div class="control-group">
-                    <label for="prompt-input">Refine / Customization Prompt</label>
-                    <textarea id="prompt-input" placeholder="Describe room layout, or type custom refinements for your uploaded scan (e.g. 'add couch at 3,3')..."></textarea>
-                </div>
-
-                <button id="btn-generate" class="btn-primary">
-                    <i class="fa-solid fa-wand-magic-sparkles"></i> Generate 3D Map & Path
-                </button>
-
-                <!-- Agent Execution Terminal -->
-                <div class="terminal-section">
-                    <div class="terminal-header">
-                        <div class="dots">
-                            <span class="dot-red"></span>
-                            <span class="dot-yellow"></span>
-                            <span class="dot-green"></span>
+                    <!-- Bottom: Generated Movement Instructions -->
+                    <div class="commands-section">
+                        <div class="commands-title">
+                            <i class="fa-solid fa-route"></i>
+                            <h4>AI Generated Movement Protocol</h4>
                         </div>
-                        <div class="terminal-title">Agent Execution Stream</div>
-                    </div>
-                    <div id="terminal-body" class="terminal-body">
-                        <div class="terminal-line system-line">System initialized. Awaiting spatial instructions...</div>
-                    </div>
-                </div>
-            </aside>
-
-            <!-- Center/Right Column: 3D Simulation Arena -->
-            <main class="arena-panel glass-card">
-                <!-- Simulation Controls Overlay -->
-                <div class="arena-header">
-                    <div class="arena-title">
-                        <i class="fa-solid fa-cube"></i>
-                        <h3>3D Grid Arena Simulation</h3>
-                        <span id="click-mode-badge" class="badge-interactive"><i class="fa-solid fa-computer-mouse"></i> Click-to-Move Active</span>
-                    </div>
-                    <div class="simulation-actions">
-                        <div class="scale-input-group">
-                            <label for="scale-input"><i class="fa-solid fa-ruler"></i> Scale (m):</label>
-                            <input type="number" id="scale-input" value="0.5" min="0.1" step="0.1" class="scale-input" />
+                        <div id="commands-list" class="commands-list">
+                            <div class="no-commands-message">No commands generated yet. Trigger the agent graph above to calculate pathfinding.</div>
                         </div>
-                        <button id="btn-export-payload" class="btn-sim-action" disabled>
-                            <i class="fa-solid fa-microchip"></i> Export Hardware
-                        </button>
-                        <button id="btn-play-sim" class="btn-sim-action" disabled>
-                            <i class="fa-solid fa-circle-play"></i> Run Autonomous Robot
-                        </button>
-                        <button id="btn-reset-sim" class="btn-sim-action" disabled>
-                            <i class="fa-solid fa-rotate-left"></i> Reset Arena
-                        </button>
                     </div>
-                </div>
-
-                <!-- Three.js Container -->
-                <div id="canvas-container" class="canvas-container">
-                    <!-- Glowing Active Command Overlay -->
-                    <div id="active-command-overlay" class="active-command-overlay hidden">
-                        <div class="pulse-indicator"></div>
-                        <div class="command-text">EXECUTING: <span id="current-command-span">MOVE_FORWARD 2 UNITS</span></div>
-                    </div>
-                    
-                    <!-- 3D Legend -->
-                    <div class="legend-overlay">
-                        <div class="legend-item"><span class="legend-color color-start"></span> Start</div>
-                        <div class="legend-item"><span class="legend-color color-dest"></span> Destination</div>
-                        <div class="legend-item"><span class="legend-color color-couch"></span> Couch</div>
-                        <div class="legend-item"><span class="legend-color color-wall"></span> Brick Wall</div>
-                        <div class="legend-item"><span class="legend-color color-fountain"></span> Fountain</div>
-                        <div class="legend-item"><span class="legend-color color-robot"></span> Robot Car</div>
-                    </div>
-                </div>
-
-                <!-- Bottom: Generated Movement Instructions -->
-                <div class="commands-section">
-                    <div class="commands-title">
-                        <i class="fa-solid fa-route"></i>
-                        <h4>AI Generated Movement Protocol</h4>
-                    </div>
-                    <div id="commands-list" class="commands-list">
-                        <div class="no-commands-message">No commands generated yet. Trigger the agent graph above to calculate pathfinding.</div>
-                    </div>
-                </div>
-            </main>
+                </main>
+            </div>
         </div>
     </div>
 
@@ -241,7 +340,7 @@
     </div>
 
     <!-- Welcome Terms & Conditions Modal [NEW] -->
-    <div id="welcome-terms-modal" class="modal-overlay">
+    <div id="welcome-terms-modal" class="modal-overlay hidden">
         <div class="modal-content glass-card welcome-modal-content">
             <div class="modal-header">
                 <h3><i class="fa-solid fa-shield-halved"></i> Terms of Service & Privacy Agreement</h3>

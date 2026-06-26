@@ -37,6 +37,12 @@ let activeProject = "";
 let activeMapName = "";
 let stagedFiles = []; // Array of File objects staged for map generation (max 10)
 
+// Supabase SaaS State [NEW]
+let supabase = null;
+let sessionToken = "";
+let userEmail = "";
+let isOfflineMode = false;
+
 // Presets Definition
 const PRESETS = {
     maze: "Construct a 6x6 room grid. The starting position is at [0, 0] and the target destination is at [5, 5]. There is a large couch occupying tiles [2, 2] and [2, 3], a brick wall from [4, 1] to [4, 3], and a custom indoor fountain at tile [1, 4]. Find a pathway and generate commands.",
@@ -46,11 +52,11 @@ const PRESETS = {
 };
 
 // Initialize Application
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
     initThree();
     setupEventListeners();
+    await initAuth(); // Initialize Supabase / Auth [NEW]
     setupWorkspaceEventListeners(); // Initialize workspace events [NEW]
-    loadProjectsList(); // Populate project list dropdown [NEW]
     loadPreset("maze");
     animate();
 });
@@ -228,6 +234,8 @@ function setupEventListeners() {
                     .catch(err => {
                         console.error("Failed to copy text: ", err);
                     });
+            }
+        });
     }
     
     // Welcome Terms Modal Logic [NEW]
@@ -236,25 +244,37 @@ function setupEventListeners() {
     const btnAccept = document.getElementById("btn-accept-welcome");
     
     if (welcomeModal && chkAccept && btnAccept) {
-        // Check if terms were already accepted in this session/device
-        const alreadyAccepted = localStorage.getItem("spatial_robotics_terms_accepted") === "true";
-        if (alreadyAccepted) {
-            welcomeModal.classList.add("hidden");
-        } else {
-            welcomeModal.classList.remove("hidden");
-        }
-        
         // Listen to checkbox change to enable/disable accept button
         chkAccept.addEventListener("change", (e) => {
             btnAccept.disabled = !e.target.checked;
         });
         
         // Listen to accept button click
-        btnAccept.addEventListener("click", () => {
-            if (chkAccept.checked) {
-                localStorage.setItem("spatial_robotics_terms_accepted", "true");
-                welcomeModal.classList.add("hidden");
-                logToTerminal("Terms of Service and Privacy Agreement accepted. Welcome to the dashboard!", "success");
+        btnAccept.addEventListener("click", async () => {
+            if (!chkAccept.checked) return;
+            
+            btnAccept.disabled = true;
+            btnAccept.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Processing...`;
+            
+            try {
+                if (isOfflineMode) {
+                    localStorage.setItem("spatial_robotics_terms_accepted", "true");
+                    welcomeModal.classList.add("hidden");
+                    logToTerminal("Terms of Service accepted (Local Dev Mode). Welcome!", "success");
+                } else {
+                    const { error } = await supabase.auth.updateUser({
+                        data: { terms_accepted_at: new Date().toISOString() }
+                    });
+                    if (error) throw error;
+                    welcomeModal.classList.add("hidden");
+                    logToTerminal("Terms of Service and Privacy Agreement accepted. Welcome to the dashboard!", "success");
+                    await loadProjectsList();
+                }
+            } catch (err) {
+                alert("Failed to save terms acceptance: " + err.message);
+                btnAccept.disabled = false;
+            } finally {
+                btnAccept.innerHTML = `<i class="fa-solid fa-circle-check"></i> Accept & Access Dashboard`;
             }
         });
     }
@@ -297,7 +317,10 @@ function logToTerminal(text, type = "system") {
 // Trigger Multi-Agent Orchestration or Multimodal Upload on Backend
 async function triggerAgentOrchestration() {
     // Block orchestration if terms were not accepted globally (sanity check)
-    if (localStorage.getItem("spatial_robotics_terms_accepted") !== "true") {
+    const termsAccepted = isOfflineMode 
+        ? (localStorage.getItem("spatial_robotics_terms_accepted") === "true")
+        : (supabaseSession?.user?.user_metadata?.terms_accepted_at);
+    if (!termsAccepted) {
         alert("Please accept the Terms of Service & Privacy Agreement to proceed.");
         return;
     }
@@ -335,7 +358,7 @@ async function triggerAgentOrchestration() {
                 headers["X-Gemini-API-Key"] = userApiKey;
             }
             
-            const response = await fetch(`/api/projects/${activeProject}/maps/${activeMapName}/generate`, {
+            const response = await secureFetch(`/api/projects/${activeProject}/maps/${activeMapName}/generate`, {
                 method: "POST",
                 headers: headers,
                 body: formData
@@ -367,6 +390,11 @@ async function triggerAgentOrchestration() {
             // Clear staged files
             stagedFiles = [];
             renderStagedFiles();
+            
+            // Sync newly generated map to Supabase Cloud
+            if (!isOfflineMode) {
+                await saveMapToCloud(activeMapName, data.map, data.commands ? data.commands.commands : []);
+            }
             
             // Reload the active map details to render the new state
             await loadMap(activeMapName);
@@ -410,7 +438,7 @@ async function triggerAgentOrchestration() {
                 headers["X-Gemini-API-Key"] = userApiKey;
             }
             
-            const response = await fetch("/api/upload-layout", {
+            const response = await secureFetch("/api/upload-layout", {
                 method: "POST",
                 headers: headers,
                 body: formData
@@ -481,7 +509,7 @@ async function triggerAgentOrchestration() {
             headers["X-Gemini-API-Key"] = userApiKey;
         }
 
-        const response = await fetch("/api/run-orchestration", {
+        const response = await secureFetch("/api/run-orchestration", {
             method: "POST",
             headers: headers,
             body: JSON.stringify({ layout_description: prompt })
@@ -1417,6 +1445,11 @@ async function onGridClick(event) {
                 // Update Hardware Export payload
                 updateHardwarePayload(path, cmds);
                 
+                // Auto-sync active map changes to cloud and local server
+                if (activeProject && activeMapName) {
+                    await saveActiveMapState();
+                }
+
                 // Auto-run the simulation
                 runAutonomousSimulation();
             }
@@ -1586,14 +1619,327 @@ function updateHardwarePayload(path, commands) {
 }
 
 // ============================================================================
-// MULTI-PROJECT WORKSPACE LOGIC [NEW]
+// SaaS SECURE FETCH INTERCEPTOR
+// ============================================================================
+async function secureFetch(url, options = {}) {
+    options.headers = options.headers || {};
+    if (sessionToken) {
+        options.headers["Authorization"] = `Bearer ${sessionToken}`;
+    }
+    return fetch(url, options);
+}
+
+// ============================================================================
+// SaaS CLOUD AUTHENTICATION & SECURITY SYSTEM
+// ============================================================================
+
+// Initialize Supabase Auth client and load configurations
+async function initAuth() {
+    try {
+        // 1. Fetch default database credentials from server
+        const configResponse = await fetch("/api/supabase-config");
+        const configData = await configResponse.json();
+        
+        // 2. Check if custom credentials are saved in localStorage
+        const customUrl = localStorage.getItem("custom_supabase_url");
+        const customKey = localStorage.getItem("custom_supabase_key");
+        
+        const url = customUrl || configData.supabase_url;
+        const key = customKey || configData.supabase_anon_key;
+        
+        // 3. Populate custom fields in UI if they exist
+        if (customUrl) document.getElementById("db-url").value = customUrl;
+        if (customKey) document.getElementById("db-key").value = customKey;
+        
+        // 4. Fall back to local developer mode if no credentials exist
+        if (!url || !key) {
+            console.log("Supabase credentials not found. Activating Offline Local Dev Mode.");
+            isOfflineMode = true;
+            document.getElementById("login-page").classList.add("hidden");
+            document.getElementById("dashboard-page").classList.remove("hidden");
+            document.getElementById("welcome-terms-modal").classList.add("hidden");
+            
+            // Set dummy email for local UI display
+            document.getElementById("user-email-display").textContent = "local-dev-user@example.com";
+            logToTerminal("SaaS Status: Connected in Offline Local Developer Mode.", "success");
+            
+            // Load local projects
+            await loadProjectsList();
+            return;
+        }
+        
+        // 5. Initialize Supabase Client
+        isOfflineMode = false;
+        supabase = supabase.createClient(url, key);
+        setupAuthEventListeners();
+        
+        // 6. Listen to active auth state sessions
+        supabase.auth.onAuthStateChange(async (event, session) => {
+            if (session) {
+                supabaseSession = session;
+                sessionToken = session.access_token;
+                userEmail = session.user.email;
+                document.getElementById("user-email-display").textContent = userEmail;
+                
+                // Read terms acceptance timestamp from user metadata
+                const termsAcceptedAt = session.user.user_metadata?.terms_accepted_at;
+                if (termsAcceptedAt) {
+                    document.getElementById("login-page").classList.add("hidden");
+                    document.getElementById("dashboard-page").classList.remove("hidden");
+                    document.getElementById("welcome-terms-modal").classList.add("hidden");
+                    await loadProjectsList();
+                } else {
+                    // Force welcome terms modal to block access
+                    document.getElementById("login-page").classList.add("hidden");
+                    document.getElementById("dashboard-page").classList.remove("hidden");
+                    document.getElementById("welcome-terms-modal").classList.remove("hidden");
+                    document.getElementById("btn-accept-welcome").disabled = true;
+                    document.getElementById("chk-accept-welcome-terms").checked = false;
+                }
+            } else {
+                supabaseSession = null;
+                sessionToken = "";
+                userEmail = "";
+                document.getElementById("login-page").classList.remove("hidden");
+                document.getElementById("dashboard-page").classList.add("hidden");
+            }
+        });
+        
+    } catch (err) {
+        console.error("Auth system initialization failure:", err);
+        logToTerminal("Auth Error: Booting into Offline Dev fallback mode.", "error");
+        isOfflineMode = true;
+        document.getElementById("login-page").classList.add("hidden");
+        document.getElementById("dashboard-page").classList.remove("hidden");
+        await loadProjectsList();
+    }
+}
+
+// Bind event listeners for registration, login, tabs, and database config
+function setupAuthEventListeners() {
+    const tabLogin = document.getElementById("tab-login");
+    const tabRegister = document.getElementById("tab-register");
+    const authTitle = document.getElementById("auth-title");
+    const authSubtitle = document.getElementById("auth-subtitle");
+    const authForm = document.getElementById("auth-form");
+    const btnAuthSubmit = document.getElementById("btn-auth-submit");
+    const btnToggleDb = document.getElementById("btn-toggle-db-config");
+    const customDbFields = document.getElementById("custom-db-fields");
+    const btnLogout = document.getElementById("btn-logout");
+    
+    let activeAuthMode = "login"; // "login" or "register"
+    
+    // Auth Tab Switching
+    if (tabLogin && tabRegister) {
+        tabLogin.addEventListener("click", () => {
+            activeAuthMode = "login";
+            tabLogin.classList.add("active");
+            tabRegister.classList.remove("active");
+            authTitle.textContent = "Welcome Back";
+            authSubtitle.textContent = "Sign in to access your secure persistent workspaces.";
+            btnAuthSubmit.innerHTML = `<i class="fa-solid fa-right-to-bracket"></i> Sign In`;
+        });
+        
+        tabRegister.addEventListener("click", () => {
+            activeAuthMode = "register";
+            tabRegister.classList.add("active");
+            tabLogin.classList.remove("active");
+            authTitle.textContent = "Create Account";
+            authSubtitle.textContent = "Register a secure profile to persist maps and assets.";
+            btnAuthSubmit.innerHTML = `<i class="fa-solid fa-user-plus"></i> Register`;
+        });
+    }
+    
+    // Toggle Custom Supabase settings view
+    if (btnToggleDb && customDbFields) {
+        btnToggleDb.addEventListener("click", () => {
+            customDbFields.classList.toggle("hidden");
+        });
+    }
+    
+    // Handle login/register form submission
+    if (authForm) {
+        authForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            
+            const email = document.getElementById("auth-email").value.trim();
+            const password = document.getElementById("auth-password").value.trim();
+            
+            // Check for custom database configuration inputs
+            const dbUrl = document.getElementById("db-url").value.trim();
+            const dbKey = document.getElementById("db-key").value.trim();
+            
+            if (dbUrl && dbKey) {
+                // If the user inputs custom db details, save to localStorage
+                localStorage.setItem("custom_supabase_url", dbUrl);
+                localStorage.setItem("custom_supabase_key", dbKey);
+                // Re-initialize client with custom db config
+                supabase = supabase.createClient(dbUrl, dbKey);
+            } else {
+                localStorage.removeItem("custom_supabase_url");
+                localStorage.removeItem("custom_supabase_key");
+            }
+            
+            btnAuthSubmit.disabled = true;
+            btnAuthSubmit.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Processing...`;
+            
+            try {
+                if (activeAuthMode === "login") {
+                    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+                    if (error) throw error;
+                    logToTerminal(`Successfully authenticated user session for ${email}.`, "success");
+                } else {
+                    const { data, error } = await supabase.auth.signUp({
+                        email,
+                        password,
+                        options: {
+                            data: {
+                                // Default metadata empty, terms must be accepted explicitly next
+                                terms_accepted_at: null
+                            }
+                        }
+                    });
+                    if (error) throw error;
+                    
+                    if (data.session) {
+                        logToTerminal(`Account registered and logged in successfully!`, "success");
+                    } else {
+                        alert("Registration successful! Please check your email inbox to confirm your account, then sign in.");
+                        logToTerminal("Registration successful! Email verification pending.", "success");
+                        tabLogin.click();
+                    }
+                }
+            } catch (err) {
+                alert("Authentication failed: " + err.message);
+                logToTerminal(`Auth Error: ${err.message}`, "error");
+            } finally {
+                btnAuthSubmit.disabled = false;
+                if (activeAuthMode === "login") {
+                    btnAuthSubmit.innerHTML = `<i class="fa-solid fa-right-to-bracket"></i> Sign In`;
+                } else {
+                    btnAuthSubmit.innerHTML = `<i class="fa-solid fa-user-plus"></i> Register`;
+                }
+            }
+        });
+    }
+    
+    // Handle User Sign Out
+    if (btnLogout) {
+        btnLogout.addEventListener("click", async () => {
+            if (isOfflineMode) {
+                alert("You are running in Offline Local Dev Mode. Refresh to re-initialize.");
+                return;
+            }
+            if (confirm("Are you sure you want to log out of your cloud session?")) {
+                await supabase.auth.signOut();
+                activeProject = "";
+                activeMapName = "";
+                document.getElementById("project-subpanel").classList.add("hidden");
+                document.getElementById("map-config-subpanel").classList.add("hidden");
+                logToTerminal("User logged out. Session terminated.", "system");
+            }
+        });
+    }
+}
+
+// ============================================================================
+// SaaS CLOUD SYNCHRONIZATION HELPERS
+// ============================================================================
+
+// Save map layout and commands to Supabase Cloud
+async function saveMapToCloud(mapName, mapDataObj, commandsList) {
+    if (isOfflineMode || !supabase) return;
+    try {
+        const userRes = await supabase.auth.getUser();
+        const user = userRes.data?.user;
+        if (!user) return;
+        
+        const { error } = await supabase.from('maps').upsert({
+            project_name: activeProject,
+            name: mapName,
+            grid_layout: mapDataObj,
+            commands: { commands: commandsList },
+            user_id: user.id
+        }, { onConflict: 'user_id,project_name,name' });
+        
+        if (error) throw error;
+        console.log("Synchronized map layout changes to Supabase cloud.");
+    } catch (err) {
+        console.error("Failed to save map grid to Supabase cloud:", err);
+    }
+}
+
+// Save active map state to both Supabase and the local backend server disk
+async function saveActiveMapState() {
+    if (!activeProject || !activeMapName || !mapData) return;
+    try {
+        // 1. Sync to Supabase cloud
+        if (!isOfflineMode) {
+            await saveMapToCloud(activeMapName, mapData, movementCommands);
+        }
+        
+        // 2. Sync to local backend disk
+        const response = await secureFetch(`/api/projects/${activeProject}/maps/${activeMapName}/save`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                grid_size: mapData.grid_size,
+                start: mapData.start,
+                destination: mapData.destination,
+                obstacles: mapData.obstacles,
+                map_matrix: mapData.map_matrix,
+                commands: movementCommands
+            })
+        });
+        const resData = await response.json();
+        if (!response.ok) throw new Error(resData.detail || "Failed to write map layout to server disk.");
+        console.log("Synchronized active map layout to local server disk.");
+    } catch (err) {
+        console.error("Failed to save active map state:", err);
+        logToTerminal(`Failed to save active map state: ${err.message}`, "error");
+    }
+}
+
+// Client-side map export download
+function exportActiveMap() {
+    if (!mapData) {
+        alert("No active map layout available to export.");
+        return;
+    }
+    const exportData = {
+        grid_size: mapData.grid_size,
+        start: mapData.start,
+        destination: mapData.destination,
+        obstacles: mapData.obstacles,
+        map_matrix: mapData.map_matrix,
+        commands: movementCommands
+    };
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportData, null, 2));
+    const downloadAnchor = document.createElement("a");
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("download", `${activeMapName || 'map'}_layout_export.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+    logToTerminal(`Map [${activeMapName}] successfully exported to local file.`, "success");
+}
+
+// ============================================================================
+// MULTI-PROJECT WORKSPACE PERSISTENT CONTROLLERS
 // ============================================================================
 
 // Load all projects and populate selector
 async function loadProjectsList() {
     try {
-        const response = await fetch("/api/projects");
-        const projects = await response.json();
+        let projects = [];
+        if (isOfflineMode) {
+            const response = await secureFetch("/api/projects");
+            projects = await response.json();
+        } else {
+            const { data, error } = await supabase.from('projects').select('name').order('name', { ascending: true });
+            if (error) throw error;
+            projects = data.map(p => p.name);
+        }
         
         const select = document.getElementById("project-select");
         select.innerHTML = '<option value="">-- Select Project --</option>';
@@ -1610,244 +1956,8 @@ async function loadProjectsList() {
         }
     } catch (err) {
         console.error("Failed to load projects list:", err);
+        logToTerminal(`Failed to load projects list: ${err.message}`, "error");
     }
-}
-
-// Set up all workspace event listeners
-function setupWorkspaceEventListeners() {
-    // Project switcher
-    document.getElementById("project-select").addEventListener("change", (e) => {
-        const val = e.target.value;
-        if (val) {
-            loadProject(val);
-        } else {
-            activeProject = "";
-            activeMapName = "";
-            document.getElementById("project-subpanel").classList.add("hidden");
-            document.getElementById("map-config-subpanel").classList.add("hidden");
-            logToTerminal("Project workspace closed.", "system");
-        }
-    });
-
-    // Create Project button
-    document.getElementById("btn-new-project").addEventListener("click", async () => {
-        const name = prompt("Enter a name for the new project folder (alphanumeric, dashes, underscores only):");
-        if (!name) return;
-        
-        const cleanName = name.replace(/[^a-zA-Z0-9_\-]/g, "");
-        if (!cleanName) {
-            alert("Invalid project name.");
-            return;
-        }
-        
-        try {
-            const response = await fetch("/api/projects/create", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name: cleanName })
-            });
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.detail || "Failed to create project");
-            
-            logToTerminal(`Project [${cleanName}] created successfully!`, "success");
-            activeProject = cleanName;
-            await loadProjectsList();
-            await loadProject(cleanName);
-        } catch (err) {
-            alert(err.message);
-        }
-    });
-
-    // Asset upload button
-    document.getElementById("btn-upload-assets").addEventListener("click", () => {
-        if (!activeProject) return;
-        document.getElementById("asset-file-input").click();
-    });
-
-    // Asset file input change
-    document.getElementById("asset-file-input").addEventListener("change", async (e) => {
-        if (!activeProject || !e.target.files || e.target.files.length === 0) return;
-        
-        const formData = new FormData();
-        Array.from(e.target.files).forEach(f => {
-            formData.append("files", f);
-        });
-        
-        logToTerminal(`Uploading ${e.target.files.length} reference asset(s) to project [${activeProject}]...`, "system");
-        
-        try {
-            const response = await fetch(`/api/projects/${activeProject}/assets/upload`, {
-                method: "POST",
-                body: formData
-            });
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.detail || "Upload failed");
-            
-            logToTerminal(`Assets uploaded: ${data.uploaded.join(", ")}`, "success");
-            await loadProjectAssets();
-        } catch (err) {
-            logToTerminal(`Asset upload failed: ${err.message}`, "error");
-        } finally {
-            e.target.value = "";
-        }
-    });
-
-    // Create Map button
-    document.getElementById("btn-new-map").addEventListener("click", async () => {
-        if (!activeProject) return;
-        const name = prompt("Enter a name for the new map (alphanumeric, dashes, underscores only):");
-        if (!name) return;
-        
-        const cleanName = name.replace(/[^a-zA-Z0-9_\-]/g, "");
-        if (!cleanName) {
-            alert("Invalid map name.");
-            return;
-        }
-        
-        try {
-            const response = await fetch(`/api/projects/${activeProject}/maps/create`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name: cleanName })
-            });
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.detail || "Failed to create map");
-            
-            logToTerminal(`Map [${cleanName}] created in project [${activeProject}]!`, "success");
-            await loadProjectMaps();
-            await loadMap(cleanName);
-        } catch (err) {
-            alert(err.message);
-        }
-    });
-
-    // Map context reference toggle
-    document.getElementById("toggle-use-assets").addEventListener("change", async (e) => {
-        if (!activeProject || !activeMapName) return;
-        const checked = e.target.checked;
-        
-        try {
-            const response = await fetch(`/api/projects/${activeProject}/maps/${activeMapName}/config`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ use_project_assets: checked })
-            });
-            const data = await response.json();
-            if (!response.ok) throw new Error("Failed to update configuration");
-            
-            const statusLabel = checked ? "ENABLED" : "DISABLED";
-            logToTerminal(`Project reference assets are now ${statusLabel} for Map [${activeMapName}].`, "system");
-        } catch (err) {
-            console.error(err);
-            e.target.checked = !checked;
-        }
-    });
-
-    // Redefine staged file input trigger in compact dragzone
-    const fileInput = document.getElementById("file-input");
-    const uploadZone = document.getElementById("upload-zone");
-    
-    const newUploadZone = uploadZone.cloneNode(true);
-    uploadZone.parentNode.replaceChild(newUploadZone, uploadZone);
-    
-    newUploadZone.addEventListener("click", () => fileInput.click());
-    
-    newUploadZone.addEventListener("dragover", (e) => {
-        e.preventDefault();
-        newUploadZone.classList.add("drag-over");
-    });
-    newUploadZone.addEventListener("dragleave", () => {
-        newUploadZone.classList.remove("drag-over");
-    });
-    newUploadZone.addEventListener("drop", (e) => {
-        e.preventDefault();
-        newUploadZone.classList.remove("drag-over");
-        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-            stageFiles(e.dataTransfer.files);
-        }
-    });
-    
-    fileInput.addEventListener("change", (e) => {
-        if (e.target.files && e.target.files.length > 0) {
-            stageFiles(e.target.files);
-            e.target.value = "";
-        }
-    });
-}
-
-// Stage selected files (Max 10 staged)
-function stageFiles(filesList) {
-    const filesArray = Array.from(filesList);
-    
-    if (stagedFiles.length + filesArray.length > 10) {
-        logToTerminal("ERROR: Cannot stage more than 10 files for map generation.", "error");
-        return;
-    }
-    
-    filesArray.forEach(f => {
-        const type = f.type || "";
-        const nameLower = f.name.toLowerCase();
-        const isSupported = type.startsWith("image/") || type.startsWith("video/") || type === "application/pdf" || nameLower.endsWith(".pdf") || nameLower.endsWith(".png") || nameLower.endsWith(".jpg") || nameLower.endsWith(".jpeg") || nameLower.endsWith(".mp4") || nameLower.endsWith(".webm");
-        
-        if (isSupported) {
-            stagedFiles.push(f);
-            logToTerminal(`Staged file: ${f.name} (${(f.size/1024/1024).toFixed(2)} MB)`, "system");
-        } else {
-            logToTerminal(`WARNING: File type not supported for ${f.name}. Stage only images, videos, or PDFs.`, "error");
-        }
-    });
-    
-    renderStagedFiles();
-}
-
-// Render the grid of staged files in UI
-function renderStagedFiles() {
-    const container = document.getElementById("staged-files-container");
-    const grid = document.getElementById("staged-files-grid");
-    const countSpan = document.getElementById("staged-count");
-    
-    countSpan.textContent = stagedFiles.length;
-    grid.innerHTML = "";
-    
-    if (stagedFiles.length === 0) {
-        container.classList.add("hidden");
-        return;
-    }
-    
-    container.classList.remove("hidden");
-    
-    stagedFiles.forEach((file, index) => {
-        const item = document.createElement("div");
-        item.className = "staged-file-item";
-        
-        let icon = "fa-file-image";
-        const nameLower = file.name.toLowerCase();
-        if (file.type.startsWith("video/") || nameLower.endsWith(".mp4") || nameLower.endsWith(".webm")) {
-            icon = "fa-file-video";
-        } else if (file.type === "application/pdf" || nameLower.endsWith(".pdf")) {
-            icon = "fa-file-pdf";
-        }
-        
-        item.innerHTML = `
-            <div class="staged-file-info">
-                <i class="fa-solid ${icon} staged-file-icon"></i>
-                <span class="staged-file-name" title="${file.name}">${file.name}</span>
-            </div>
-            <button class="btn-remove-staged" data-index="${index}"><i class="fa-solid fa-xmark"></i></button>
-        `;
-        grid.appendChild(item);
-    });
-    
-    grid.querySelectorAll(".btn-remove-staged").forEach(btn => {
-        btn.addEventListener("click", (e) => {
-            e.stopPropagation();
-            const idx = parseInt(btn.dataset.index);
-            const name = stagedFiles[idx].name;
-            stagedFiles.splice(idx, 1);
-            logToTerminal(`Unstaged file: ${name}`, "system");
-            renderStagedFiles();
-        });
-    });
 }
 
 // Load a selected project and reveal subpanel
@@ -1866,12 +1976,12 @@ async function loadProject(projectName) {
     logToTerminal(`Project Workspace [${projectName}] successfully loaded.`, "success");
 }
 
-// Fetch and render project reference assets
+// Fetch and render project reference assets (Files stored on backend filesystem)
 async function loadProjectAssets() {
     if (!activeProject) return;
     
     try {
-        const response = await fetch(`/api/projects/${activeProject}/assets`);
+        const response = await secureFetch(`/api/projects/${activeProject}/assets`);
         const assets = await response.json();
         
         const countSpan = document.getElementById("asset-count");
@@ -1911,7 +2021,7 @@ async function loadProjectAssets() {
                 if (!confirm(`Are you sure you want to delete asset '${assetName}'?`)) return;
                 
                 try {
-                    const res = await fetch(`/api/projects/${activeProject}/assets/${assetName}`, {
+                    const res = await secureFetch(`/api/projects/${activeProject}/assets/${assetName}`, {
                         method: "DELETE"
                     });
                     if (!res.ok) throw new Error("Delete failed");
@@ -1927,13 +2037,20 @@ async function loadProjectAssets() {
     }
 }
 
-// Fetch and render project maps
+// Fetch and render project maps (cloud query in SaaS mode, backend query in fallback)
 async function loadProjectMaps() {
     if (!activeProject) return;
     
     try {
-        const response = await fetch(`/api/projects/${activeProject}/maps`);
-        const maps = await response.json();
+        let maps = [];
+        if (isOfflineMode) {
+            const response = await secureFetch(`/api/projects/${activeProject}/maps`);
+            maps = await response.json();
+        } else {
+            const { data, error } = await supabase.from('maps').select('name').eq('project_name', activeProject).order('name', { ascending: true });
+            if (error) throw error;
+            maps = data.map(m => m.name);
+        }
         
         const list = document.getElementById("project-maps-list");
         list.innerHTML = "";
@@ -1957,6 +2074,7 @@ async function loadProjectMaps() {
         });
     } catch (err) {
         console.error("Failed to load project maps:", err);
+        logToTerminal(`Failed to load maps: ${err.message}`, "error");
     }
 }
 
@@ -1968,14 +2086,24 @@ async function loadMap(mapName) {
     logToTerminal(`Loading Workspace Map [${mapName}]...`, "system");
     
     try {
-        const response = await fetch(`/api/projects/${activeProject}/maps/${mapName}`);
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.detail || "Failed to load map details");
+        let mapDetails = null;
+        if (isOfflineMode) {
+            const response = await secureFetch(`/api/projects/${activeProject}/maps/${mapName}`);
+            mapDetails = await response.json();
+        } else {
+            const { data, error } = await supabase.from('maps').select('*').eq('project_name', activeProject).eq('name', mapName).single();
+            if (error) throw error;
+            mapDetails = {
+                map: data.grid_layout,
+                config: data.config || { use_project_assets: true },
+                commands: data.commands || { commands: [] }
+            };
+        }
         
-        mapData = data.map;
-        movementCommands = data.commands ? data.commands.commands : [];
+        mapData = mapDetails.map;
+        movementCommands = mapDetails.commands ? mapDetails.commands.commands : [];
         
-        document.getElementById("toggle-use-assets").checked = data.config.use_project_assets;
+        document.getElementById("toggle-use-assets").checked = mapDetails.config.use_project_assets;
         
         build3DGridScene(mapData);
         populateCommandsList(movementCommands);
@@ -1997,5 +2125,284 @@ async function loadMap(mapName) {
     } catch (err) {
         logToTerminal(`Failed to load map details: ${err.message}`, "error");
     }
+}
+
+// Set up all workspace event listeners
+function setupWorkspaceEventListeners() {
+    // Project switcher
+    document.getElementById("project-select").addEventListener("change", (e) => {
+        const val = e.target.value;
+        if (val) {
+            loadProject(val);
+        } else {
+            activeProject = "";
+            activeMapName = "";
+            document.getElementById("project-subpanel").classList.add("hidden");
+            document.getElementById("map-config-subpanel").classList.add("hidden");
+            logToTerminal("Project workspace closed.", "system");
+        }
+    });
+
+    // Create Project button
+    document.getElementById("btn-new-project").addEventListener("click", async () => {
+        const name = prompt("Enter a name for the new project folder (alphanumeric, dashes, underscores only):");
+        if (!name) return;
+        
+        const cleanName = name.replace(/[^a-zA-Z0-9_\-]/g, "");
+        if (!cleanName) {
+            alert("Invalid project name.");
+            return;
+        }
+        
+        try {
+            if (!isOfflineMode) {
+                // 1. Save to Supabase Cloud Table
+                const { error } = await supabase.from('projects').insert([{ name: cleanName }]);
+                if (error) {
+                    if (error.code === '23505') { // unique constraint violation
+                        throw new Error("Project already exists in cloud database.");
+                    }
+                    throw error;
+                }
+            }
+            
+            // 2. Create sandboxed directory on local server
+            const response = await secureFetch("/api/projects/create", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name: cleanName })
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.detail || "Failed to create local project directory.");
+            
+            logToTerminal(`Project [${cleanName}] created successfully!`, "success");
+            activeProject = cleanName;
+            await loadProjectsList();
+            await loadProject(cleanName);
+        } catch (err) {
+            alert(err.message);
+            logToTerminal(`Failed to create project: ${err.message}`, "error");
+        }
+    });
+
+    // Asset upload button
+    document.getElementById("btn-upload-assets").addEventListener("click", () => {
+        if (!activeProject) return;
+        document.getElementById("asset-file-input").click();
+    });
+
+    // Asset file input change
+    document.getElementById("asset-file-input").addEventListener("change", async (e) => {
+        if (!activeProject || !e.target.files || e.target.files.length === 0) return;
+        
+        const formData = new FormData();
+        Array.from(e.target.files).forEach(f => {
+            formData.append("files", f);
+        });
+        
+        logToTerminal(`Uploading ${e.target.files.length} reference asset(s) to project [${activeProject}]...`, "system");
+        
+        try {
+            const response = await secureFetch(`/api/projects/${activeProject}/assets/upload`, {
+                method: "POST",
+                body: formData
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.detail || "Upload failed");
+            
+            logToTerminal(`Assets uploaded: ${data.uploaded.join(", ")}`, "success");
+            await loadProjectAssets();
+        } catch (err) {
+            logToTerminal(`Asset upload failed: ${err.message}`, "error");
+        } finally {
+            e.target.value = "";
+        }
+    });
+
+    // Create Map button
+    document.getElementById("btn-new-map").addEventListener("click", async () => {
+        if (!activeProject) return;
+        const name = prompt("Enter a name for the new map (alphanumeric, dashes, underscores only):");
+        if (!name) return;
+        
+        const cleanName = name.replace(/[^a-zA-Z0-9_\-]/g, "");
+        if (!cleanName) {
+            alert("Invalid map name.");
+            return;
+        }
+        
+        try {
+            if (!isOfflineMode) {
+                const emptyMap = {
+                    grid_size: [6, 6],
+                    start: [0, 0],
+                    destination: [5, 5],
+                    obstacles: [],
+                    map_matrix: [
+                        [0, 0, 0, 0, 0, 0],
+                        [0, 0, 0, 0, 0, 0],
+                        [0, 0, 0, 0, 0, 0],
+                        [0, 0, 0, 0, 0, 0],
+                        [0, 0, 0, 0, 0, 0],
+                        [0, 0, 0, 0, 0, 0]
+                    ]
+                };
+                const { error } = await supabase.from('maps').insert([{
+                    project_name: activeProject,
+                    name: cleanName,
+                    grid_layout: emptyMap,
+                    config: { use_project_assets: true }
+                }]);
+                if (error) {
+                    if (error.code === '23505') {
+                        throw new Error("Map already exists in cloud database.");
+                    }
+                    throw error;
+                }
+            }
+            
+            const response = await secureFetch(`/api/projects/${activeProject}/maps/create`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name: cleanName })
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.detail || "Failed to create local map file.");
+            
+            logToTerminal(`Map [${cleanName}] created in project [${activeProject}]!`, "success");
+            await loadProjectMaps();
+            await loadMap(cleanName);
+        } catch (err) {
+            alert(err.message);
+            logToTerminal(`Failed to create map: ${err.message}`, "error");
+        }
+    });
+
+    // Map context reference toggle
+    document.getElementById("toggle-use-assets").addEventListener("change", async (e) => {
+        if (!activeProject || !activeMapName) return;
+        const checked = e.target.checked;
+        
+        try {
+            if (!isOfflineMode) {
+                const { error } = await supabase.from('maps').update({ config: { use_project_assets: checked } }).eq('project_name', activeProject).eq('name', activeMapName);
+                if (error) throw error;
+            }
+            
+            const response = await secureFetch(`/api/projects/${activeProject}/maps/${activeMapName}/config`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ use_project_assets: checked })
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error("Failed to update configuration");
+            
+            const statusLabel = checked ? "ENABLED" : "DISABLED";
+            logToTerminal(`Project reference assets are now ${statusLabel} for Map [${activeMapName}].`, "system");
+        } catch (err) {
+            console.error(err);
+            logToTerminal(`Failed to update asset config: ${err.message}`, "error");
+            e.target.checked = !checked;
+        }
+    });
+
+    // Import Map button click
+    document.getElementById("btn-import-map").addEventListener("click", () => {
+        if (!activeProject) return;
+        document.getElementById("import-map-input").click();
+    });
+
+    // Import Map file input change
+    document.getElementById("import-map-input").addEventListener("change", async (e) => {
+        if (!activeProject || !e.target.files || e.target.files.length === 0) return;
+        const file = e.target.files[0];
+        
+        // Read file via FileReader
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+            try {
+                const mapContent = JSON.parse(event.target.result);
+                
+                // Validate schema
+                if (!mapContent.grid_size || !mapContent.map_matrix) {
+                    throw new Error("Invalid map layout schema. Must contain 'grid_size' and 'map_matrix'.");
+                }
+                
+                const mapName = file.name.replace(/\.json$/i, "").replace(/[^a-zA-Z0-9_\-]/g, "");
+                const cleanMapName = mapName || "imported";
+                
+                logToTerminal(`Importing map [${cleanMapName}] into project [${activeProject}]...`, "system");
+                
+                // 1. Upload to Supabase if not offline
+                if (!isOfflineMode) {
+                    const { error } = await supabase.from('maps').upsert({
+                        project_name: activeProject,
+                        name: cleanMapName,
+                        grid_layout: mapContent,
+                        commands: { commands: mapContent.commands || [] },
+                        user_id: (await supabase.auth.getUser()).data.user.id
+                    }, { onConflict: 'user_id,project_name,name' });
+                    if (error) throw error;
+                }
+                
+                // 2. Upload to backend
+                const formData = new FormData();
+                formData.append("file", file);
+                
+                const response = await secureFetch(`/api/projects/${activeProject}/maps/import`, {
+                    method: "POST",
+                    body: formData
+                });
+                
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.detail || "Failed to save map on backend.");
+                
+                logToTerminal(`Map [${cleanMapName}] imported successfully!`, "success");
+                await loadProjectMaps();
+                await loadMap(cleanMapName);
+            } catch (err) {
+                alert("Import failed: " + err.message);
+                logToTerminal(`Import failed: ${err.message}`, "error");
+            }
+        };
+        reader.readAsText(file);
+        e.target.value = ""; // clear
+    });
+
+    // Export Map button click
+    document.getElementById("btn-export-map").addEventListener("click", () => {
+        exportActiveMap();
+    });
+
+    // Redefine staged file input trigger in compact dragzone
+    const fileInput = document.getElementById("file-input");
+    const uploadZone = document.getElementById("upload-zone");
+    
+    const newUploadZone = uploadZone.cloneNode(true);
+    uploadZone.parentNode.replaceChild(newUploadZone, uploadZone);
+    
+    newUploadZone.addEventListener("click", () => fileInput.click());
+    
+    newUploadZone.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        newUploadZone.classList.add("drag-over");
+    });
+    newUploadZone.addEventListener("dragleave", () => {
+        newUploadZone.classList.remove("drag-over");
+    });
+    newUploadZone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        newUploadZone.classList.remove("drag-over");
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            stageFiles(e.dataTransfer.files);
+        }
+    });
+    
+    fileInput.addEventListener("change", (e) => {
+        if (e.target.files && e.target.files.length > 0) {
+            stageFiles(e.target.files);
+            e.target.value = "";
+        }
+    });
 }
 
