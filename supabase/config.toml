@@ -1,0 +1,10 @@
+# Supabase Project Configuration File
+# References: https://supabase.com/docs/guides/cli/config
+
+project_id = "spatial-robotics-arena"
+
+[functions.todos]
+verify_jwt = false # Set to false since @supabase/server SDK will handle stateless validation manually
+
+[functions.projects]
+verify_jwt = false # Let @supabase/server SDK validate JWTs internally for user/admin scopes
