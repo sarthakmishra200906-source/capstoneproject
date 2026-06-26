@@ -230,19 +230,31 @@ function setupEventListeners() {
                     });
     }
     
-    // API Key Disclaimer toggle listener [NEW]
-    const apiKeyInput = document.getElementById("sys-param-token");
-    const disclaimerBlock = document.getElementById("api-key-disclaimer-block");
-    if (apiKeyInput && disclaimerBlock) {
-        apiKeyInput.addEventListener("input", () => {
-            const hasKey = apiKeyInput.value.trim().length > 0;
-            if (hasKey) {
-                disclaimerBlock.classList.remove("hidden");
-            } else {
-                disclaimerBlock.classList.add("hidden");
-                // Uncheck when hidden/cleared
-                const chk = document.getElementById("accept-api-terms");
-                if (chk) chk.checked = false;
+    // Welcome Terms Modal Logic [NEW]
+    const welcomeModal = document.getElementById("welcome-terms-modal");
+    const chkAccept = document.getElementById("chk-accept-welcome-terms");
+    const btnAccept = document.getElementById("btn-accept-welcome");
+    
+    if (welcomeModal && chkAccept && btnAccept) {
+        // Check if terms were already accepted in this session/device
+        const alreadyAccepted = localStorage.getItem("spatial_robotics_terms_accepted") === "true";
+        if (alreadyAccepted) {
+            welcomeModal.classList.add("hidden");
+        } else {
+            welcomeModal.classList.remove("hidden");
+        }
+        
+        // Listen to checkbox change to enable/disable accept button
+        chkAccept.addEventListener("change", (e) => {
+            btnAccept.disabled = !e.target.checked;
+        });
+        
+        // Listen to accept button click
+        btnAccept.addEventListener("click", () => {
+            if (chkAccept.checked) {
+                localStorage.setItem("spatial_robotics_terms_accepted", "true");
+                welcomeModal.classList.add("hidden");
+                logToTerminal("Terms of Service and Privacy Agreement accepted. Welcome to the dashboard!", "success");
             }
         });
     }
@@ -284,12 +296,9 @@ function logToTerminal(text, type = "system") {
 
 // Trigger Multi-Agent Orchestration or Multimodal Upload on Backend
 async function triggerAgentOrchestration() {
-    const userApiKey = document.getElementById("sys-param-token")?.value.trim();
-    const acceptTerms = document.getElementById("accept-api-terms")?.checked;
-    
-    if (userApiKey && !acceptTerms) {
-        logToTerminal("ERROR: You have entered a personal API key but have not accepted the Terms & Conditions. Please read and check the agreement box below the API key field to proceed.", "error");
-        alert("Please read and accept the Terms & Conditions to proceed with using your personal API Key.");
+    // Block orchestration if terms were not accepted globally (sanity check)
+    if (localStorage.getItem("spatial_robotics_terms_accepted") !== "true") {
+        alert("Please accept the Terms of Service & Privacy Agreement to proceed.");
         return;
     }
 

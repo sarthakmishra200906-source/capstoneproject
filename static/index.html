@@ -60,16 +60,6 @@
                         <span class="api-key-tooltip" title="Your API key is sent via secure headers and never stored. If left blank, local Ollama is used."><i class="fa-solid fa-circle-question"></i></span>
                     </div>
                     
-                    <!-- Terms & Conditions Disclaimer Block [NEW] -->
-                    <div id="api-key-disclaimer-block" class="api-key-disclaimer-block hidden">
-                        <div class="disclaimer-text">
-                            <strong>Notice & Agreement:</strong> Your key is processed purely in local volatile memory and is never saved, logged, or stored. By checking the box below, you acknowledge that you are using your own credentials and accept full responsibility for any tokens/costs consumed on your personal Google AI Studio account. This software is provided "as-is" without any warranties.
-                        </div>
-                        <label class="checkbox-container">
-                            <input type="checkbox" id="accept-api-terms" />
-                            <span class="checkbox-label">I accept the Terms & Conditions</span>
-                        </label>
-                    </div>
                 </div>
 
                 <!-- Workspace Manager [NEW] -->
@@ -245,6 +235,44 @@
                 </div>
                 <div class="modal-footer">
                     <button id="btn-copy-payload" class="btn-primary"><i class="fa-solid fa-copy"></i> Copy JSON</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Welcome Terms & Conditions Modal [NEW] -->
+    <div id="welcome-terms-modal" class="modal-overlay">
+        <div class="modal-content glass-card welcome-modal-content">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-shield-halved"></i> Terms of Service & Privacy Agreement</h3>
+            </div>
+            <div class="modal-body welcome-modal-body">
+                <div class="welcome-intro">
+                    Welcome to the <strong>Spatial Robotics Autonomous 3D Arena</strong>. Before accessing the interactive simulation dashboard and agent orchestration station, you must read and accept the safety and privacy terms below.
+                </div>
+                
+                <div class="terms-scroll-box">
+                    <h5>1. Data Privacy & Zero-Storage Architecture</h5>
+                    <p>Your security is our absolute priority. This platform is engineered with a Zero-Leak architecture. If you optionally choose to input your personal Gemini API key, the key is processed exclusively in volatile runtime memory to authorize your immediate requests. It is never written to disk, never saved to any database, never logged, and never transmitted to any third party under our control.</p>
+                    
+                    <h5>2. API Usage, Costs & Rate Limits</h5>
+                    <p>Providing your personal Gemini API key is completely optional. If left blank, the system operates on cached presets or falls back to a local Ollama server. If you choose to enter your own API key to bypass rate limitations, you do so under your own developer credentials and assume full financial and operational responsibility for all tokens consumed, API costs, or rate-limiting penalties on your Google AI Studio account.</p>
+                    
+                    <h5>3. Disclaimer of Liability & Project Scope</h5>
+                    <p>This software is an educational capstone project developed for the Kaggle 5-Day AI Learning Session powered by Google. It is provided "as-is" without warranty of any kind, express or implied. The developer and Google shall not be held liable for any direct, indirect, or consequential damages, including Google account suspensions or financial charges, arising from your use of this platform.</p>
+                </div>
+                
+                <div class="terms-acceptance-row">
+                    <label class="checkbox-container">
+                        <input type="checkbox" id="chk-accept-welcome-terms" />
+                        <span class="checkbox-label">I have read, understood, and agree to these Terms and Conditions.</span>
+                    </label>
+                </div>
+                
+                <div class="modal-footer welcome-footer">
+                    <button id="btn-accept-welcome" class="btn-primary" disabled>
+                        <i class="fa-solid fa-circle-check"></i> Accept & Access Dashboard
+                    </button>
                 </div>
             </div>
         </div>

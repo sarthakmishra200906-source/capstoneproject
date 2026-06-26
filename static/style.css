@@ -1218,31 +1218,74 @@ input:checked + .slider:before {
     color: var(--accent-red);
 }
 
-/* API Key Disclaimer & Terms Block */
-.api-key-disclaimer-block {
-    margin-top: 10px;
-    padding: 10px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+/* Welcome Terms Modal Styling */
+.welcome-modal-content {
+    max-width: 600px !important;
+    width: 90%;
+    border: 1px solid rgba(0, 210, 255, 0.2) !important;
+    box-shadow: 0 0 30px rgba(0, 210, 255, 0.15) !important;
+}
+
+.welcome-modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.welcome-intro {
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-primary);
+}
+
+.welcome-intro strong {
+    color: var(--accent-blue);
+}
+
+.terms-scroll-box {
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.05);
     border-radius: 8px;
-    font-size: 0.72rem;
+    padding: 15px;
+    max-height: 220px;
+    overflow-y: auto;
+    font-size: 11px;
     color: var(--text-secondary);
-    transition: all 0.3s ease;
-}
-
-.api-key-disclaimer-block.hidden {
-    display: none !important;
-    opacity: 0;
-}
-
-.disclaimer-text {
-    line-height: 1.45;
-    margin-bottom: 8px;
+    line-height: 1.6;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
     text-align: justify;
 }
 
-.disclaimer-text strong {
+.terms-scroll-box h5 {
     color: var(--accent-blue);
+    font-size: 12px;
+    margin: 0;
+    font-weight: 600;
+}
+
+.terms-scroll-box p {
+    margin: 0;
+}
+
+.terms-acceptance-row {
+    margin-top: 5px;
+}
+
+.welcome-footer {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 10px;
+}
+
+#btn-accept-welcome:disabled {
+    background: rgba(255, 255, 255, 0.05) !important;
+    border-color: rgba(255, 255, 255, 0.08) !important;
+    color: rgba(255, 255, 255, 0.2) !important;
+    cursor: not-allowed !important;
+    box-shadow: none !important;
+    transform: none !important;
 }
 
 .checkbox-container {
@@ -1253,19 +1296,19 @@ input:checked + .slider:before {
     user-select: none;
     color: var(--text-primary);
     font-weight: 500;
-    margin-top: 4px;
 }
 
 .checkbox-container input {
     cursor: pointer;
     accent-color: var(--accent-blue);
-    width: 13px;
-    height: 13px;
+    width: 14px;
+    height: 14px;
     margin: 0;
 }
 
 .checkbox-label {
-    font-size: 0.75rem;
+    font-size: 12px;
+    color: var(--text-secondary);
 }
 
 
