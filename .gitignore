@@ -14,3 +14,7 @@ __pycache__/
 # Local Simulation Data
 map_data.json
 movement_commands.json
+
+# Local Projects Workspace
+projects/
+

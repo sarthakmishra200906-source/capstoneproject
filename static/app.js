@@ -32,6 +32,11 @@ let robotFacingDegrees = 0;      // 0: NORTH, 90: EAST, 180: SOUTH, 270: WEST
 const CELL_SIZE = 2;              // Dimensions of each grid tile in Three.js units
 let uploadedFile = null;
 
+// Workspace State [NEW]
+let activeProject = "";
+let activeMapName = "";
+let stagedFiles = []; // Array of File objects staged for map generation (max 10)
+
 // Presets Definition
 const PRESETS = {
     maze: "Construct a 6x6 room grid. The starting position is at [0, 0] and the target destination is at [5, 5]. There is a large couch occupying tiles [2, 2] and [2, 3], a brick wall from [4, 1] to [4, 3], and a custom indoor fountain at tile [1, 4]. Find a pathway and generate commands.",
@@ -44,6 +49,8 @@ const PRESETS = {
 document.addEventListener("DOMContentLoaded", () => {
     initThree();
     setupEventListeners();
+    setupWorkspaceEventListeners(); // Initialize workspace events [NEW]
+    loadProjectsList(); // Populate project list dropdown [NEW]
     loadPreset("maze");
     animate();
 });
@@ -271,9 +278,81 @@ async function triggerAgentOrchestration() {
     const terminal = document.getElementById("terminal-body");
     terminal.innerHTML = ""; // Clear log
     
-    // If a file is uploaded or we are refining an active map
+    // Check if we are inside an active project map workspace [NEW]
+    if (activeProject && activeMapName) {
+        logToTerminal(`Initializing Workspace Generator for Map [${activeMapName}] in Project [${activeProject}]...`, "system");
+        
+        try {
+            const formData = new FormData();
+            if (prompt) {
+                formData.append("custom_prompt", prompt);
+            }
+            
+            // Append all staged files (up to 10)
+            if (stagedFiles.length > 0) {
+                logToTerminal(`Staging ${stagedFiles.length} map scan files for processing...`, "system");
+                stagedFiles.forEach(file => {
+                    formData.append("files", file);
+                });
+            }
+            
+            const headers = {};
+            const userApiKey = document.getElementById("sys-param-token")?.value.trim();
+            if (userApiKey) {
+                headers["X-Gemini-API-Key"] = userApiKey;
+            }
+            
+            const response = await fetch(`/api/projects/${activeProject}/maps/${activeMapName}/generate`, {
+                method: "POST",
+                headers: headers,
+                body: formData
+            });
+            
+            const data = await response.json();
+            
+            if (!response.ok || data.status === "error") {
+                throw new Error(data.detail || data.message || "Failed to generate map layout");
+            }
+            
+            // Update Active AI Engine Status Badge
+            const badge = document.getElementById("ai-engine-badge");
+            if (badge && data.engine) {
+                if (data.engine === "ollama_fallback") {
+                    badge.className = "badge-engine badge-ollama";
+                    badge.innerHTML = `<i class="fa-solid fa-server"></i> Engine: Ollama (Local)`;
+                    logToTerminal("WARNING: Gemini API limit or error. Automatically fell back to local Ollama fallback engine.", "error");
+                } else {
+                    badge.className = "badge-engine badge-gemini";
+                    badge.innerHTML = `<i class="fa-solid fa-brain"></i> Engine: Gemini 2.5 Flash`;
+                }
+            }
+            
+            const engineLabel = data.engine === "ollama_fallback" ? "Ollama (Local)" : "Gemini";
+            logToTerminal(`${engineLabel}: Successfully generated/refined map layout.`, "success");
+            logToTerminal("Generated Grid Map Matrix:\n" + JSON.stringify(data.map, null, 2), "agent-text");
+            
+            // Clear staged files
+            stagedFiles = [];
+            renderStagedFiles();
+            
+            // Reload the active map details to render the new state
+            await loadMap(activeMapName);
+            
+            logToTerminal("3D Arena and navigation commands successfully updated in workspace!", "success");
+            
+        } catch (err) {
+            logToTerminal(`Workspace generation failed: ${err.message}`, "error");
+            console.error(err);
+        } finally {
+            document.getElementById("btn-generate").disabled = false;
+            document.getElementById("btn-generate").innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> Generate 3D Map & Path`;
+        }
+        return;
+    }
+    
+    // --- Fallback backward-compatible single-file mode ---
     if (uploadedFile || (mapData && prompt)) {
-        logToTerminal("Initializing Multimodal Spatial Scan Parser...", "system");
+        logToTerminal("Initializing Multimodal Spatial Scan Parser (Fallback Mode)...", "system");
         if (uploadedFile) {
             logToTerminal(`Sending file [${uploadedFile.name}] and customization prompt to Gemini spatial model.`, "agent-header");
         } else {
@@ -1470,6 +1549,420 @@ function updateHardwarePayload(path, commands) {
         btnExport.disabled = false;
         // Save payload globally so the modal can view it
         window.hardwarePayload = payload;
+    }
+}
+
+// ============================================================================
+// MULTI-PROJECT WORKSPACE LOGIC [NEW]
+// ============================================================================
+
+// Load all projects and populate selector
+async function loadProjectsList() {
+    try {
+        const response = await fetch("/api/projects");
+        const projects = await response.json();
+        
+        const select = document.getElementById("project-select");
+        select.innerHTML = '<option value="">-- Select Project --</option>';
+        
+        projects.forEach(p => {
+            const opt = document.createElement("option");
+            opt.value = p;
+            opt.textContent = p;
+            select.appendChild(opt);
+        });
+        
+        if (activeProject) {
+            select.value = activeProject;
+        }
+    } catch (err) {
+        console.error("Failed to load projects list:", err);
+    }
+}
+
+// Set up all workspace event listeners
+function setupWorkspaceEventListeners() {
+    // Project switcher
+    document.getElementById("project-select").addEventListener("change", (e) => {
+        const val = e.target.value;
+        if (val) {
+            loadProject(val);
+        } else {
+            activeProject = "";
+            activeMapName = "";
+            document.getElementById("project-subpanel").classList.add("hidden");
+            document.getElementById("map-config-subpanel").classList.add("hidden");
+            logToTerminal("Project workspace closed.", "system");
+        }
+    });
+
+    // Create Project button
+    document.getElementById("btn-new-project").addEventListener("click", async () => {
+        const name = prompt("Enter a name for the new project folder (alphanumeric, dashes, underscores only):");
+        if (!name) return;
+        
+        const cleanName = name.replace(/[^a-zA-Z0-9_\-]/g, "");
+        if (!cleanName) {
+            alert("Invalid project name.");
+            return;
+        }
+        
+        try {
+            const response = await fetch("/api/projects/create", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name: cleanName })
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.detail || "Failed to create project");
+            
+            logToTerminal(`Project [${cleanName}] created successfully!`, "success");
+            activeProject = cleanName;
+            await loadProjectsList();
+            await loadProject(cleanName);
+        } catch (err) {
+            alert(err.message);
+        }
+    });
+
+    // Asset upload button
+    document.getElementById("btn-upload-assets").addEventListener("click", () => {
+        if (!activeProject) return;
+        document.getElementById("asset-file-input").click();
+    });
+
+    // Asset file input change
+    document.getElementById("asset-file-input").addEventListener("change", async (e) => {
+        if (!activeProject || !e.target.files || e.target.files.length === 0) return;
+        
+        const formData = new FormData();
+        Array.from(e.target.files).forEach(f => {
+            formData.append("files", f);
+        });
+        
+        logToTerminal(`Uploading ${e.target.files.length} reference asset(s) to project [${activeProject}]...`, "system");
+        
+        try {
+            const response = await fetch(`/api/projects/${activeProject}/assets/upload`, {
+                method: "POST",
+                body: formData
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.detail || "Upload failed");
+            
+            logToTerminal(`Assets uploaded: ${data.uploaded.join(", ")}`, "success");
+            await loadProjectAssets();
+        } catch (err) {
+            logToTerminal(`Asset upload failed: ${err.message}`, "error");
+        } finally {
+            e.target.value = "";
+        }
+    });
+
+    // Create Map button
+    document.getElementById("btn-new-map").addEventListener("click", async () => {
+        if (!activeProject) return;
+        const name = prompt("Enter a name for the new map (alphanumeric, dashes, underscores only):");
+        if (!name) return;
+        
+        const cleanName = name.replace(/[^a-zA-Z0-9_\-]/g, "");
+        if (!cleanName) {
+            alert("Invalid map name.");
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/projects/${activeProject}/maps/create`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name: cleanName })
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.detail || "Failed to create map");
+            
+            logToTerminal(`Map [${cleanName}] created in project [${activeProject}]!`, "success");
+            await loadProjectMaps();
+            await loadMap(cleanName);
+        } catch (err) {
+            alert(err.message);
+        }
+    });
+
+    // Map context reference toggle
+    document.getElementById("toggle-use-assets").addEventListener("change", async (e) => {
+        if (!activeProject || !activeMapName) return;
+        const checked = e.target.checked;
+        
+        try {
+            const response = await fetch(`/api/projects/${activeProject}/maps/${activeMapName}/config`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ use_project_assets: checked })
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error("Failed to update configuration");
+            
+            const statusLabel = checked ? "ENABLED" : "DISABLED";
+            logToTerminal(`Project reference assets are now ${statusLabel} for Map [${activeMapName}].`, "system");
+        } catch (err) {
+            console.error(err);
+            e.target.checked = !checked;
+        }
+    });
+
+    // Redefine staged file input trigger in compact dragzone
+    const fileInput = document.getElementById("file-input");
+    const uploadZone = document.getElementById("upload-zone");
+    
+    const newUploadZone = uploadZone.cloneNode(true);
+    uploadZone.parentNode.replaceChild(newUploadZone, uploadZone);
+    
+    newUploadZone.addEventListener("click", () => fileInput.click());
+    
+    newUploadZone.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        newUploadZone.classList.add("drag-over");
+    });
+    newUploadZone.addEventListener("dragleave", () => {
+        newUploadZone.classList.remove("drag-over");
+    });
+    newUploadZone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        newUploadZone.classList.remove("drag-over");
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            stageFiles(e.dataTransfer.files);
+        }
+    });
+    
+    fileInput.addEventListener("change", (e) => {
+        if (e.target.files && e.target.files.length > 0) {
+            stageFiles(e.target.files);
+            e.target.value = "";
+        }
+    });
+}
+
+// Stage selected files (Max 10 staged)
+function stageFiles(filesList) {
+    const filesArray = Array.from(filesList);
+    
+    if (stagedFiles.length + filesArray.length > 10) {
+        logToTerminal("ERROR: Cannot stage more than 10 files for map generation.", "error");
+        return;
+    }
+    
+    filesArray.forEach(f => {
+        const type = f.type || "";
+        const nameLower = f.name.toLowerCase();
+        const isSupported = type.startsWith("image/") || type.startsWith("video/") || type === "application/pdf" || nameLower.endsWith(".pdf") || nameLower.endsWith(".png") || nameLower.endsWith(".jpg") || nameLower.endsWith(".jpeg") || nameLower.endsWith(".mp4") || nameLower.endsWith(".webm");
+        
+        if (isSupported) {
+            stagedFiles.push(f);
+            logToTerminal(`Staged file: ${f.name} (${(f.size/1024/1024).toFixed(2)} MB)`, "system");
+        } else {
+            logToTerminal(`WARNING: File type not supported for ${f.name}. Stage only images, videos, or PDFs.`, "error");
+        }
+    });
+    
+    renderStagedFiles();
+}
+
+// Render the grid of staged files in UI
+function renderStagedFiles() {
+    const container = document.getElementById("staged-files-container");
+    const grid = document.getElementById("staged-files-grid");
+    const countSpan = document.getElementById("staged-count");
+    
+    countSpan.textContent = stagedFiles.length;
+    grid.innerHTML = "";
+    
+    if (stagedFiles.length === 0) {
+        container.classList.add("hidden");
+        return;
+    }
+    
+    container.classList.remove("hidden");
+    
+    stagedFiles.forEach((file, index) => {
+        const item = document.createElement("div");
+        item.className = "staged-file-item";
+        
+        let icon = "fa-file-image";
+        const nameLower = file.name.toLowerCase();
+        if (file.type.startsWith("video/") || nameLower.endsWith(".mp4") || nameLower.endsWith(".webm")) {
+            icon = "fa-file-video";
+        } else if (file.type === "application/pdf" || nameLower.endsWith(".pdf")) {
+            icon = "fa-file-pdf";
+        }
+        
+        item.innerHTML = `
+            <div class="staged-file-info">
+                <i class="fa-solid ${icon} staged-file-icon"></i>
+                <span class="staged-file-name" title="${file.name}">${file.name}</span>
+            </div>
+            <button class="btn-remove-staged" data-index="${index}"><i class="fa-solid fa-xmark"></i></button>
+        `;
+        grid.appendChild(item);
+    });
+    
+    grid.querySelectorAll(".btn-remove-staged").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const idx = parseInt(btn.dataset.index);
+            const name = stagedFiles[idx].name;
+            stagedFiles.splice(idx, 1);
+            logToTerminal(`Unstaged file: ${name}`, "system");
+            renderStagedFiles();
+        });
+    });
+}
+
+// Load a selected project and reveal subpanel
+async function loadProject(projectName) {
+    activeProject = projectName;
+    activeMapName = ""; // Reset
+    
+    logToTerminal(`Loading Project Workspace [${projectName}]...`, "system");
+    
+    document.getElementById("project-subpanel").classList.remove("hidden");
+    document.getElementById("map-config-subpanel").classList.add("hidden");
+    
+    await loadProjectAssets();
+    await loadProjectMaps();
+    
+    logToTerminal(`Project Workspace [${projectName}] successfully loaded.`, "success");
+}
+
+// Fetch and render project reference assets
+async function loadProjectAssets() {
+    if (!activeProject) return;
+    
+    try {
+        const response = await fetch(`/api/projects/${activeProject}/assets`);
+        const assets = await response.json();
+        
+        const countSpan = document.getElementById("asset-count");
+        countSpan.textContent = assets.length;
+        
+        const list = document.getElementById("project-assets-list");
+        list.innerHTML = "";
+        
+        if (assets.length === 0) {
+            list.innerHTML = '<div class="no-assets-message">No reference assets uploaded yet.</div>';
+            return;
+        }
+        
+        assets.forEach(asset => {
+            const item = document.createElement("div");
+            item.className = "asset-item";
+            
+            let icon = "fa-file-image";
+            const nameLower = asset.name.toLowerCase();
+            if (nameLower.endsWith(".mp4") || nameLower.endsWith(".webm") || nameLower.endsWith(".avi")) {
+                icon = "fa-file-video";
+            } else if (nameLower.endsWith(".pdf")) {
+                icon = "fa-file-pdf";
+            }
+            
+            item.innerHTML = `
+                <span class="asset-name" title="${asset.name}"><i class="fa-solid ${icon}"></i> ${asset.name}</span>
+                <button class="btn-delete-asset" data-name="${asset.name}"><i class="fa-solid fa-trash"></i></button>
+            `;
+            list.appendChild(item);
+        });
+        
+        list.querySelectorAll(".btn-delete-asset").forEach(btn => {
+            btn.addEventListener("click", async (e) => {
+                e.stopPropagation();
+                const assetName = btn.dataset.name;
+                if (!confirm(`Are you sure you want to delete asset '${assetName}'?`)) return;
+                
+                try {
+                    const res = await fetch(`/api/projects/${activeProject}/assets/${assetName}`, {
+                        method: "DELETE"
+                    });
+                    if (!res.ok) throw new Error("Delete failed");
+                    logToTerminal(`Asset '${assetName}' deleted.`, "system");
+                    await loadProjectAssets();
+                } catch (err) {
+                    alert(err.message);
+                }
+            });
+        });
+    } catch (err) {
+        console.error("Failed to load project assets:", err);
+    }
+}
+
+// Fetch and render project maps
+async function loadProjectMaps() {
+    if (!activeProject) return;
+    
+    try {
+        const response = await fetch(`/api/projects/${activeProject}/maps`);
+        const maps = await response.json();
+        
+        const list = document.getElementById("project-maps-list");
+        list.innerHTML = "";
+        
+        if (maps.length === 0) {
+            list.innerHTML = '<div class="no-maps-message">No maps created yet.</div>';
+            return;
+        }
+        
+        maps.forEach(mapName => {
+            const item = document.createElement("div");
+            item.className = `map-item ${mapName === activeMapName ? 'active' : ''}`;
+            item.innerHTML = `<span><i class="fa-solid fa-map"></i> ${mapName}</span>`;
+            
+            item.addEventListener("click", () => {
+                list.querySelectorAll(".map-item").forEach(i => i.classList.remove("active"));
+                item.classList.add("active");
+                loadMap(mapName);
+            });
+            list.appendChild(item);
+        });
+    } catch (err) {
+        console.error("Failed to load project maps:", err);
+    }
+}
+
+// Fetch and render a specific map's grid layout and commands
+async function loadMap(mapName) {
+    if (!activeProject) return;
+    activeMapName = mapName;
+    
+    logToTerminal(`Loading Workspace Map [${mapName}]...`, "system");
+    
+    try {
+        const response = await fetch(`/api/projects/${activeProject}/maps/${mapName}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || "Failed to load map details");
+        
+        mapData = data.map;
+        movementCommands = data.commands ? data.commands.commands : [];
+        
+        document.getElementById("toggle-use-assets").checked = data.config.use_project_assets;
+        
+        build3DGridScene(mapData);
+        populateCommandsList(movementCommands);
+        
+        if (mapData.start && mapData.destination) {
+            const path = bfsPathfinder(mapData.map_matrix, mapData.start, mapData.destination);
+            if (path) {
+                drawPathway(path);
+                updateHardwarePayload(path, movementCommands);
+            }
+        }
+        
+        document.getElementById("map-config-subpanel").classList.remove("hidden");
+        
+        document.getElementById("btn-play-sim").disabled = (movementCommands.length === 0);
+        document.getElementById("btn-reset-sim").disabled = false;
+        
+        logToTerminal(`Workspace Map [${mapName}] loaded successfully. Click anywhere on the grid to set a path, or upload scan files to refine.`, "success");
+    } catch (err) {
+        logToTerminal(`Failed to load map details: ${err.message}`, "error");
     }
 }
 

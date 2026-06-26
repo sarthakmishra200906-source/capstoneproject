@@ -591,6 +591,530 @@ def read_root():
         logger.error(f"Failed to read index.html: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# ============================================================================
+# MULTI-PROJECT WORKSPACE PERSISTENT APIS
+# ============================================================================
+
+PROJECTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "projects")
+if not os.path.exists(PROJECTS_DIR):
+    os.makedirs(PROJECTS_DIR)
+
+def get_safe_project_path(project_name: str) -> str:
+    """Returns a sanitized absolute path for a project, preventing path traversal."""
+    sanitized = re.sub(r"[^a-zA-Z0-9_\-]", "", project_name)
+    if not sanitized:
+        raise HTTPException(status_code=400, detail="Invalid project name.")
+    return os.path.join(PROJECTS_DIR, sanitized)
+
+def get_safe_filepath(base_dir: str, filename: str) -> str:
+    """Returns a sanitized path for a file inside a directory, preventing traversal."""
+    clean_filename = os.path.basename(filename)
+    clean_filename = re.sub(r"[^a-zA-Z0-9_\-\.]", "", clean_filename)
+    if not clean_filename or clean_filename in (".", ".."):
+        raise HTTPException(status_code=400, detail="Invalid file name.")
+    return os.path.join(base_dir, clean_filename)
+
+def find_path_and_commands(map_data: dict) -> dict:
+    """Calculates the BFS path and translates it into movement commands on the backend."""
+    grid = map_data.get("map_matrix")
+    start = map_data.get("start")
+    end = map_data.get("destination")
+    
+    if not grid or start is None or end is None:
+        return {"path": [], "commands": []}
+        
+    start = tuple(start)
+    end = tuple(end)
+    
+    rows = len(grid)
+    cols = len(grid[0])
+    
+    # BFS
+    queue = [[start]]
+    visited = {start}
+    dirs = [(-1, 0), (1, 0), (0, -1), (0, 1)] # North, South, West, East
+    
+    path = None
+    while queue:
+        current_path = queue.pop(0)
+        r, c = current_path[-1]
+        
+        if (r, c) == end:
+            path = current_path
+            break
+            
+        for dr, dc in dirs:
+            nr, nc = r + dr, c + dc
+            if 0 <= nr < rows and 0 <= nc < cols:
+                if grid[nr][nc] == 0 and (nr, nc) not in visited:
+                    visited.add((nr, nc))
+                    queue.append(current_path + [(nr, nc)])
+                    
+    if not path:
+        return {"path": [], "commands": []}
+        
+    # Translate to commands
+    commands = []
+    current_facing = 0 # 0: N, 90: E, 180: S, 270: W
+    step_count = 0
+    
+    for i in range(1, len(path)):
+        r1, c1 = path[i-1]
+        r2, c2 = path[i]
+        
+        dr, dc = r2 - r1, c2 - c1
+        
+        move_dir = 0
+        if dr == -1 and dc == 0: move_dir = 0
+        elif dr == 0 and dc == 1: move_dir = 90
+        elif dr == 1 and dc == 0: move_dir = 180
+        elif dr == 0 and dc == -1: move_dir = 270
+        
+        rotation_diff = (move_dir - current_facing) % 360
+        if rotation_diff != 0:
+            if step_count > 0:
+                commands.append(f"MOVE_FORWARD {step_count} UNITS")
+                step_count = 0
+                
+            if rotation_diff == 180:
+                commands.append("ROTATE_CLOCKWISE 90")
+                commands.append("ROTATE_CLOCKWISE 90")
+            elif rotation_diff == 90:
+                commands.append("ROTATE_CLOCKWISE 90")
+            elif rotation_diff == 270:
+                commands.append("ROTATE_COUNTER_CLOCKWISE 90")
+            current_facing = move_dir
+            
+        step_count += 1
+        
+    if step_count > 0:
+        commands.append(f"MOVE_FORWARD {step_count} UNITS")
+        
+    return {
+        "path": path,
+        "commands": commands
+    }
+
+@app.get("/api/projects")
+def list_projects():
+    if not os.path.exists(PROJECTS_DIR):
+        return []
+    projects = []
+    for name in os.listdir(PROJECTS_DIR):
+        p_path = os.path.join(PROJECTS_DIR, name)
+        if os.path.isdir(p_path):
+            projects.append(name)
+    return sorted(projects)
+
+class CreateProjectRequest(BaseModel):
+    name: str
+
+@app.post("/api/projects/create")
+def create_project(req: CreateProjectRequest):
+    p_path = get_safe_project_path(req.name)
+    if os.path.exists(p_path):
+        raise HTTPException(status_code=400, detail="Project already exists.")
+    os.makedirs(p_path)
+    os.makedirs(os.path.join(p_path, "assets"))
+    os.makedirs(os.path.join(p_path, "maps"))
+    return {"status": "success", "message": f"Project '{req.name}' created."}
+
+@app.get("/api/projects/{project_name}/assets")
+def list_assets(project_name: str):
+    p_path = get_safe_project_path(project_name)
+    assets_dir = os.path.join(p_path, "assets")
+    if not os.path.exists(assets_dir):
+        return []
+    assets = []
+    for name in os.listdir(assets_dir):
+        f_path = os.path.join(assets_dir, name)
+        if os.path.isfile(f_path):
+            assets.append({
+                "name": name,
+                "size": os.path.getsize(f_path)
+            })
+    return assets
+
+@app.post("/api/projects/{project_name}/assets/upload")
+async def upload_assets(project_name: str, files: list[UploadFile] = File(...)):
+    p_path = get_safe_project_path(project_name)
+    assets_dir = os.path.join(p_path, "assets")
+    if not os.path.exists(assets_dir):
+        os.makedirs(assets_dir)
+        
+    existing_files = [f for f in os.listdir(assets_dir) if os.path.isfile(os.path.join(assets_dir, f))]
+    if len(existing_files) + len(files) > 20:
+        raise HTTPException(status_code=400, detail="Project asset library cannot exceed 20 files.")
+        
+    uploaded = []
+    for file in files:
+        safe_path = get_safe_filepath(assets_dir, file.filename)
+        
+        content_type = file.content_type or ""
+        if not (content_type.startswith("image/") or content_type.startswith("video/") or content_type == "application/pdf" or file.filename.lower().endswith((".pdf", ".png", ".jpg", ".jpeg", ".mp4", ".webm"))):
+            raise HTTPException(status_code=400, detail=f"Unsupported file type for {file.filename}. Only images, videos, and PDFs are allowed.")
+        
+        content = await file.read()
+        with open(safe_path, "wb") as f:
+            f.write(content)
+        uploaded.append(os.path.basename(safe_path))
+        
+    return {"status": "success", "uploaded": uploaded}
+
+@app.delete("/api/projects/{project_name}/assets/{filename}")
+def delete_asset(project_name: str, filename: str):
+    p_path = get_safe_project_path(project_name)
+    assets_dir = os.path.join(p_path, "assets")
+    safe_path = get_safe_filepath(assets_dir, filename)
+    if os.path.exists(safe_path):
+        os.remove(safe_path)
+        return {"status": "success", "message": f"Asset '{filename}' deleted."}
+    raise HTTPException(status_code=404, detail="Asset not found.")
+
+@app.get("/api/projects/{project_name}/maps")
+def list_maps(project_name: str):
+    p_path = get_safe_project_path(project_name)
+    maps_dir = os.path.join(p_path, "maps")
+    if not os.path.exists(maps_dir):
+        return []
+    maps_list = []
+    for name in os.listdir(maps_dir):
+        if name.endswith(".json") and not name.endswith("_config.json") and not name.endswith("_cmds.json"):
+            map_display = name[:-5]
+            maps_list.append(map_display)
+    return sorted(maps_list)
+
+class CreateMapRequest(BaseModel):
+    name: str
+
+@app.post("/api/projects/{project_name}/maps/create")
+def create_map(project_name: str, req: CreateMapRequest):
+    p_path = get_safe_project_path(project_name)
+    maps_dir = os.path.join(p_path, "maps")
+    if not os.path.exists(maps_dir):
+        os.makedirs(maps_dir)
+        
+    safe_name = re.sub(r"[^a-zA-Z0-9_\-]", "", req.name)
+    if not safe_name:
+        raise HTTPException(status_code=400, detail="Invalid map name.")
+        
+    map_file = os.path.join(maps_dir, f"{safe_name}.json")
+    config_file = os.path.join(maps_dir, f"{safe_name}_config.json")
+    
+    if os.path.exists(map_file):
+        raise HTTPException(status_code=400, detail="Map already exists.")
+        
+    empty_map = {
+        "grid_size": [6, 6],
+        "start": [0, 0],
+        "destination": [5, 5],
+        "obstacles": [],
+        "map_matrix": [
+            [0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0]
+        ]
+    }
+    with open(map_file, "w") as f:
+        json.dump(empty_map, f, indent=2)
+        
+    config = {"use_project_assets": True}
+    with open(config_file, "w") as f:
+        json.dump(config, f, indent=2)
+        
+    return {"status": "success", "message": f"Map '{req.name}' created."}
+
+@app.get("/api/projects/{project_name}/maps/{map_name}")
+def get_map_details(project_name: str, map_name: str):
+    p_path = get_safe_project_path(project_name)
+    maps_dir = os.path.join(p_path, "maps")
+    
+    safe_map_name = re.sub(r"[^a-zA-Z0-9_\-]", "", map_name)
+    map_file = os.path.join(maps_dir, f"{safe_map_name}.json")
+    config_file = os.path.join(maps_dir, f"{safe_map_name}_config.json")
+    commands_file = os.path.join(maps_dir, f"{safe_map_name}_cmds.json")
+    
+    if not os.path.exists(map_file):
+        raise HTTPException(status_code=404, detail="Map not found.")
+        
+    try:
+        with open(map_file, "r") as f:
+            map_data = json.load(f)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to load map data.")
+        
+    config = {"use_project_assets": True}
+    if os.path.exists(config_file):
+        try:
+            with open(config_file, "r") as f:
+                config = json.load(f)
+        except Exception:
+            pass
+            
+    commands_data = None
+    if os.path.exists(commands_file):
+        try:
+            with open(commands_file, "r") as f:
+                commands_data = json.load(f)
+        except Exception:
+            pass
+            
+    return {
+        "map": map_data,
+        "config": config,
+        "commands": commands_data
+    }
+
+class UpdateConfigRequest(BaseModel):
+    use_project_assets: bool
+
+@app.post("/api/projects/{project_name}/maps/{map_name}/config")
+def update_map_config(project_name: str, map_name: str, req: UpdateConfigRequest):
+    p_path = get_safe_project_path(project_name)
+    maps_dir = os.path.join(p_path, "maps")
+    
+    safe_map_name = re.sub(r"[^a-zA-Z0-9_\-]", "", map_name)
+    config_file = os.path.join(maps_dir, f"{safe_map_name}_config.json")
+    
+    if not os.path.exists(os.path.join(maps_dir, f"{safe_map_name}.json")):
+        raise HTTPException(status_code=404, detail="Map not found.")
+        
+    config = {"use_project_assets": req.use_project_assets}
+    try:
+        with open(config_file, "w") as f:
+            json.dump(config, f, indent=2)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to save configuration.")
+        
+    return {"status": "success", "config": config}
+
+@app.post("/api/projects/{project_name}/maps/{map_name}/generate")
+async def generate_project_map(
+    project_name: str,
+    map_name: str,
+    files: Optional[list[UploadFile]] = File(None),
+    custom_prompt: Optional[str] = Form(None),
+    x_gemini_api_key: Optional[str] = Header(None)
+):
+    """
+    Core generator endpoint. Parses multiple uploaded files (up to 10) and prompt.
+    Includes project assets context if enabled, and generates the map and path commands.
+    """
+    safe_map_name = re.sub(r"[^a-zA-Z0-9_\-]", "", map_name)
+    safe_project_name = re.sub(r"[^a-zA-Z0-9_\-]", "", project_name)
+    logger.info(f"Generating map '{safe_map_name}' for project '{safe_project_name}'...")
+    
+    # Validation
+    p_path = get_safe_project_path(project_name)
+    maps_dir = os.path.join(p_path, "maps")
+    assets_dir = os.path.join(p_path, "assets")
+    
+    map_file = os.path.join(maps_dir, f"{safe_map_name}.json")
+    config_file = os.path.join(maps_dir, f"{safe_map_name}_config.json")
+    commands_file = os.path.join(maps_dir, f"{safe_map_name}_cmds.json")
+    
+    if not os.path.exists(map_file):
+        raise HTTPException(status_code=404, detail="Map not found.")
+        
+    if x_gemini_api_key:
+        if not validate_api_key(x_gemini_api_key):
+            raise HTTPException(status_code=400, detail="Invalid API Key format.")
+            
+    # Check config
+    use_project_assets = True
+    if os.path.exists(config_file):
+        try:
+            with open(config_file, "r") as f:
+                cfg = json.load(f)
+                use_project_assets = cfg.get("use_project_assets", True)
+        except Exception:
+            pass
+
+    # Stage files (Max 10 uploaded)
+    if files and len(files) > 10:
+        raise HTTPException(status_code=400, detail="Cannot stage more than 10 files for map generation.")
+
+    current_layout_dict = None
+    if os.path.exists(map_file):
+        try:
+            with open(map_file, "r") as f:
+                current_layout_dict = json.load(f)
+        except Exception:
+            pass
+
+    all_media_parts = []
+    
+    # Process Map-Specific Uploaded Files
+    if files:
+        for file in files:
+            file_bytes = await file.read()
+            mime_type = file.content_type or ""
+            
+            # Local frame extraction for video uploads
+            if mime_type.startswith("video/") or file.filename.lower().endswith((".mp4", ".webm")):
+                frames = extract_video_frames(file_bytes, 5)
+                for f_bytes, f_mime in frames:
+                    all_media_parts.append((f_bytes, f_mime))
+            else:
+                if not mime_type:
+                    mime_type = "application/pdf" if file.filename.lower().endswith(".pdf") else "image/jpeg"
+                all_media_parts.append((file_bytes, mime_type))
+                
+    # Process Project-Level Reference Assets if enabled
+    if use_project_assets and os.path.exists(assets_dir):
+        asset_files = [f for f in os.listdir(assets_dir) if os.path.isfile(os.path.join(assets_dir, f))]
+        for asset_name in asset_files[:20]:
+            asset_path = os.path.join(assets_dir, asset_name)
+            mime_type = "application/pdf"
+            if asset_name.lower().endswith((".png", ".jpg", ".jpeg")):
+                mime_type = "image/jpeg"
+            elif asset_name.lower().endswith((".mp4", ".webm", ".avi")):
+                mime_type = "video/mp4"
+                
+            try:
+                with open(asset_path, "rb") as af:
+                    asset_bytes = af.read()
+                
+                if mime_type.startswith("video/"):
+                    frames = extract_video_frames(asset_bytes, 5)
+                    for f_bytes, f_mime in frames:
+                        all_media_parts.append((f_bytes, f_mime))
+                else:
+                    all_media_parts.append((asset_bytes, mime_type))
+            except Exception as ae:
+                logger.warning(f"Failed to load reference asset {asset_name}: {str(ae)}")
+
+    base_instruction = (
+        "Analyze this room layout and represent its spatial layout as a grid map matrix of integers "
+        "(0 for free walkable tile, 1 for obstacle). The output MUST be a JSON object with the following structure:\n\n"
+        "{\n"
+        "  \"grid_size\": [height, width],\n"
+        "  \"start\": [row, col],\n"
+        "  \"destination\": [row, col],\n"
+        "  \"obstacles\": [\n"
+        "    {\"name\": \"couch\", \"coordinates\": [[r1, c1], [r2, c2]]},\n"
+        "    {\"name\": \"wall\", \"coordinates\": [[r3, c3]]}\n"
+        "  ],\n"
+        "  \"map_matrix\": [[0, 0, ...], ...]\n"
+        "}\n\n"
+        "Guidelines:\n"
+        "1. Estimate the grid size based on visible room dimensions or blueprint layout (typically between 5x5 and 10x10).\n"
+        "2. Identify walkable paths (0s) and obstacles (1s).\n"
+        "3. Mark furniture like couches, tables, walls, or fountains under 'obstacles' with their name and grid coordinates.\n"
+        "4. Place a starting position (e.g. [0,0] or similar) and a destination position (e.g. [height-1, width-1]) where a robot could reasonably navigate.\n"
+        "5. Return ONLY the raw JSON object inside a ```json ``` block. No other explanation."
+    )
+
+    if current_layout_dict and custom_prompt:
+        prompt = (
+            f"You are a spatial layout assistant. Update the existing layout JSON based on the user's customization request.\n\n"
+            f"Current Layout JSON:\n{json.dumps(current_layout_dict, indent=2)}\n\n"
+            f"User's Customization Request:\n\"{custom_prompt}\"\n\n"
+            f"Modify the layout JSON accordingly. Ensure the map_matrix matches the obstacles, grid size, start, and destination (0 for free tile, 1 for obstacle).\n"
+            f"Return ONLY the updated JSON object inside a ```json ``` block. No other explanation."
+        )
+    elif custom_prompt:
+        prompt = (
+            f"{base_instruction}\n\n"
+            f"CRITICAL: The user has requested the following custom refinements or descriptions to apply to the map:\n"
+            f"\"{custom_prompt}\"\n"
+            f"Please adjust the generated grid size, obstacles, start, destination, and matrix to match this description."
+        )
+    else:
+        prompt = base_instruction
+
+    # Call Model (Gemini Primary with local Ollama fallback)
+    api_key = x_gemini_api_key or os.environ.get("GEMINI_API_KEY")
+    result_map = None
+    engine = "gemini"
+
+    if api_key and api_key != "your_gemini_api_key_here":
+        try:
+            logger.info("Attempting Gemini API primary parsing...")
+            client = genai.Client(api_key=api_key)
+            
+            contents = []
+            for m_bytes, m_mime in all_media_parts:
+                contents.append(types.Part.from_bytes(data=m_bytes, mime_type=m_mime))
+            contents.append(prompt)
+            
+            response = client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=contents
+            )
+            
+            text = response.text
+            start_idx = text.find("```json")
+            if start_idx != -1:
+                end_idx = text.find("```", start_idx + 7)
+                json_str = text[start_idx + 7:end_idx].strip()
+            else:
+                start_idx = text.find("{")
+                end_idx = text.rfind("}") + 1
+                json_str = text[start_idx:end_idx].strip()
+            
+            result_map = json.loads(json_str)
+            engine = "gemini"
+        except Exception as e:
+            logger.warning(f"Gemini API primary parsing failed: {str(e)}. Falling back to Ollama...")
+
+    if not result_map:
+        try:
+            images_list = [m_bytes for m_bytes, m_mime in all_media_parts if m_mime.startswith("image/")][:1]
+            result_map = call_ollama_fallback(prompt, images_list if images_list else None)
+            engine = "ollama_fallback"
+        except Exception as fallback_err:
+            logger.exception("Ollama fallback failed:")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Both Gemini API and local Ollama fallback failed. Details: {str(fallback_err)}"
+            )
+
+    # Calculate path and commands on the backend instantly
+    path_info = find_path_and_commands(result_map)
+    
+    # Save map and commands persistently
+    try:
+        with open(map_file, "w") as f:
+            json.dump(result_map, f, indent=2)
+            
+        with open(commands_file, "w") as f:
+            json.dump({"commands": path_info["commands"]}, f, indent=2)
+    except Exception as se:
+        logger.error(f"Failed to save generated map files: {str(se)}")
+        raise HTTPException(status_code=500, detail="Failed to save generated map files to workspace.")
+
+    return {
+        "status": "success",
+        "map": result_map,
+        "commands": {"commands": path_info["commands"]},
+        "engine": engine
+    }
+
+@app.get("/")
+def read_root():
+    """
+    Serves the 3D grid arena frontend dashboard.
+    """
+    index_path = os.path.join(static_dir, "index.html")
+    if not os.path.exists(index_path):
+        logger.error(f"Frontend index.html not found at: {index_path}")
+        return HTMLResponse(
+            content="<h3>Frontend assets not found. Make sure static/index.html is created.</h3>",
+            status_code=404
+        )
+        
+    try:
+        with open(index_path, "r", encoding="utf-8") as f:
+            html_content = f.read()
+        return HTMLResponse(content=html_content)
+    except Exception as e:
+        logger.error(f"Failed to read index.html: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 if __name__ == "__main__":
     import uvicorn
     logger.info("Starting FastAPI Server on http://127.0.0.1:8000...")

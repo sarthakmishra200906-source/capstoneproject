@@ -61,6 +61,56 @@
                     </div>
                 </div>
 
+                <!-- Workspace Manager [NEW] -->
+                <div class="workspace-section glass-subcard">
+                    <div class="control-group">
+                        <label><i class="fa-solid fa-folder-tree"></i> Project Workspace</label>
+                        <div class="project-selector-row">
+                            <select id="project-select" class="project-select">
+                                <option value="">-- Select Project --</option>
+                            </select>
+                            <button id="btn-new-project" class="btn-icon" title="Create New Project"><i class="fa-solid fa-folder-plus"></i></button>
+                        </div>
+                    </div>
+
+                    <!-- Active Project Sub-panel -->
+                    <div id="project-subpanel" class="project-subpanel hidden">
+                        <!-- Project Reference Assets -->
+                        <div class="control-group mt-12">
+                            <div class="sub-section-header">
+                                <label><i class="fa-solid fa-photo-film"></i> Reference Assets (<span id="asset-count">0</span>/20)</label>
+                                <button id="btn-upload-assets" class="btn-icon-sub" title="Upload Project Assets"><i class="fa-solid fa-plus"></i></button>
+                                <input type="file" id="asset-file-input" multiple accept="image/*,video/*,application/pdf" style="display:none;" />
+                            </div>
+                            <div id="project-assets-list" class="project-assets-list">
+                                <div class="no-assets-message">No reference assets uploaded yet.</div>
+                            </div>
+                        </div>
+
+                        <!-- Project Maps -->
+                        <div class="control-group mt-12">
+                            <div class="sub-section-header">
+                                <label><i class="fa-solid fa-map-location-dot"></i> Workspace Maps</label>
+                                <button id="btn-new-map" class="btn-icon-sub" title="Create New Map"><i class="fa-solid fa-plus"></i></button>
+                            </div>
+                            <div id="project-maps-list" class="project-maps-list">
+                                <div class="no-maps-message">No maps created yet.</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Map Reference Switch -->
+                        <div id="map-config-subpanel" class="map-config-subpanel mt-12 hidden">
+                            <div class="toggle-control-group">
+                                <span>Use Project Reference Assets</span>
+                                <label class="switch">
+                                    <input type="checkbox" id="toggle-use-assets" checked>
+                                    <span class="slider round"></span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Presets -->
                 <div class="control-group">
                     <label>Layout Presets</label>
@@ -72,21 +122,16 @@
                     </div>
                 </div>
 
-                <!-- Multimodal File Upload -->
+                <!-- Multimodal Staged Files Upload [NEW] -->
                 <div class="control-group">
-                    <label>Multimodal Scan (Photo / Video / Blueprint)</label>
-                    <div id="upload-zone" class="upload-zone">
-                        <i class="fa-solid fa-cloud-arrow-up upload-icon"></i>
-                        <div class="upload-text">Drag & drop or click to upload</div>
-                        <div class="upload-subtext">PNG, JPG, MP4, WEBM (Max 15MB)</div>
-                        <input type="file" id="file-input" accept="image/*,video/*" style="display: none;" />
+                    <label><i class="fa-solid fa-layer-group"></i> Stage Scan Files (<span id="staged-count">0</span>/10)</label>
+                    <div id="staged-files-container" class="staged-files-container hidden">
+                        <div id="staged-files-grid" class="staged-files-grid"></div>
                     </div>
-                    <div id="file-preview-container" class="file-preview-container hidden">
-                        <div class="file-info">
-                            <i class="fa-solid fa-file-image preview-file-icon"></i>
-                            <span id="file-preview-name">room_photo.jpg</span>
-                        </div>
-                        <button type="button" id="btn-clear-file" class="btn-clear-file"><i class="fa-solid fa-xmark"></i></button>
+                    <div id="upload-zone" class="upload-zone compact-zone">
+                        <i class="fa-solid fa-plus upload-icon-small"></i>
+                        <div class="upload-text-small">Click or drag files to stage</div>
+                        <input type="file" id="file-input" multiple accept="image/*,video/*,application/pdf" style="display: none;" />
                     </div>
                 </div>
 
