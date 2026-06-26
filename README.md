@@ -25,13 +25,20 @@ graph TD
 
 ## 2. Key Features & System Capabilities
 
-### 1. Multimodal Spatial Scanner & Floor Plan Parser
-*   **Unified Upload Dropzone**: Supports dragging and dropping real room photographs, walk-through videos, or 2D floor plans (PNG, JPG, MP4, WEBM).
+### 1. Persistent Multi-Project Workspace [NEW]
+*   **Workspace Sandboxing**: Organizes maps and reference data under isolated project folders in the `projects/` directory, preventing path traversal via strict name sanitization.
+*   **Persistent Map Manager**: Create and manage multiple maps within a single project. Each map has its own grid configuration, obstacle locations, and pre-calculated path/commands saved persistently on the backend.
+*   **Reference Asset Library (Max 20 Files)**: Upload floor plans, room blueprints, and walk-through videos to a project-level asset library.
+*   **Context Reference Switch**: Toggle a glowing slider to enable or disable whether the AI map generator uses the project's reference assets as context for parsing a specific map.
+*   **Staged Uploads Queue (Max 10 Files)**: Drag and drop or click to stage multiple scans (images, videos, or PDFs) in a visual queue showing count badges, file-type icons, and delete buttons before generating a map.
+
+### 2. Multimodal Spatial Scanner & Floor Plan Parser
+*   **Unified Upload Dropzone**: Supports dragging and dropping real room photographs, walk-through videos, or 2D floor plans (PNG, JPG, MP4, WEBM, PDF).
 *   **AFC Local Frame Extraction**: Optimizes video processing by extracting 5 evenly spaced frames locally using OpenCV. This reduces token consumption by over 90% and prevents Gemini API rate limits.
-*   **Gemini 2.5 Flash Integration**: The vision model automatically detects room boundaries, estimates metric dimensions, and maps coordinates of obstacles (e.g., couches, walls, fountains).
+*   **Gemini 2.5 Flash Integration**: The vision model automatically detects room boundaries, estimates metric dimensions, and maps coordinates of obstacles (e.g., couches, walls, fountains) from the staged scans and project assets.
 *   **Ollama Local Fallback**: Automatically falls back to a local Ollama server (running Llama 3) if the Gemini API key is missing or encounters rate limits, ensuring continuous offline functionality.
 
-### 2. High-Fidelity 3D Simulation Arena
+### 3. High-Fidelity 3D Simulation Arena
 *   **Futuristic Three.js Visualization**: Renders the generated grid in a dark-theme glassmorphic interface with neon accent lighting.
 *   **Realistic 3D Assets**:
     *   **Sofa**: Detailed leather cushions, backrests, and armrests.
@@ -39,12 +46,13 @@ graph TD
     *   **Futuristic Robot Car**: Features high-gloss metallic paint, alloy wheel rims, glowing sensor eyes, and a spinning LiDAR scanner.
 *   **Water Particle Physics**: Features an animated fountain basin with a dynamic particle physics engine where individual water droplets spout, fall under gravity, and reset continuously.
 
-### 3. Real-Time Interactive Click-to-Move
+### 4. Real-Time Interactive Click-to-Move & Pre-Calculation
 *   **Dynamic Hover Highlights**: Hovering over the 3D grid displays a glowing cyan square for walkable cells or a red square for blocked cells.
 *   **Instant Pathfinding**: Clicking any walkable cell triggers a client-side Breadth-First Search (BFS) pathfinder that calculates the shortest collision-free route from the robot's current coordinates.
 *   **Neon Pathway Overlay**: Draws a glowing neon path connecting the grid cells, along which the robot immediately executes smooth rotations and forward translations in real-time.
+*   **Backend Pre-Calculation**: When a map is generated, the backend automatically pre-calculates the shortest path and saves the locomotion commands to disk instantly. Opening a saved map renders the completed route and loads the movement script immediately.
 
-### 4. Hardware-Ready Metric Export
+### 5. Hardware-Ready Metric Export
 *   **Scale Configurator**: Adjust the real-world scale (e.g., 0.5 meters per grid cell).
 *   **Hardware Integration Payload**: Generates a standard JSON payload translating path coordinates into metric commands (e.g., `MOVE_FORWARD 1.50 METERS` instead of grid units), ready to be copied or streamed directly to physical microcontrollers (Raspberry Pi, Arduino, ROS).
 
@@ -73,7 +81,7 @@ The backend utilizes the **Google Agent Development Kit (ADK)** to orchestrate a
 
 ## 4. Enterprise-Grade Security Hardening (100-Vulnerability Defense)
 
-The platform incorporates comprehensive security defenses to mitigate all **100 common security vulnerabilities** across client-side, session, API, server-side, and configuration layers. Detailed mappings are documented in the [security_audit_100.md](file:///C:/Users/Dell/.gemini/antigravity-ide/brain/48de43af-da91-4119-8f74-3845becee785/security_audit_100.md) file.
+The platform incorporates comprehensive security defenses to mitigate all **100 common security vulnerabilities** across client-side, session, API, server-side, and configuration layers. Detailed mappings are documented in the `security_audit_100.md` file.
 
 ### Key Security Controls
 *   **Subresource Integrity (SRI)**: Pinned all external CDN scripts (Three.js, OrbitControls, FontAwesome) with cryptographic SHA-384 hashes and `crossorigin="anonymous"` configurations to prevent Magecart/Formjacking supply chain attacks.
@@ -92,11 +100,38 @@ The platform incorporates comprehensive security defenses to mitigate all **100 
 
 ---
 
-## 5. Getting Started & Local Setup
+## 5. Workspace REST API Reference
+
+The server exposes a complete workspace API surface to manage projects, assets, and maps:
+
+### Projects
+*   `GET /api/projects`: List all active project folder names.
+*   `POST /api/projects/create`: Create a new isolated project directory.
+    *   **Body**: `{"name": "string"}`
+
+### Reference Assets
+*   `GET /api/projects/{project_name}/assets`: List all uploaded reference assets and their sizes.
+*   `POST /api/projects/{project_name}/assets/upload`: Upload up to 20 images, videos, or PDFs as references.
+    *   **Multipart Form**: `files: List[UploadFile]`
+*   `DELETE /api/projects/{project_name}/assets/{filename}`: Delete a reference asset from the library.
+
+### Maps
+*   `GET /api/projects/{project_name}/maps`: List all maps in a project.
+*   `POST /api/projects/{project_name}/maps/create`: Create a new map with a default 6x6 grid.
+    *   **Body**: `{"name": "string"}`
+*   `GET /api/projects/{project_name}/maps/{map_name}`: Retrieve map grid layout, config parameters, and pre-calculated path commands.
+*   `POST /api/projects/{project_name}/maps/{map_name}/config`: Update map configuration (e.g. toggle project assets reference).
+    *   **Body**: `{"use_project_assets": bool}`
+*   `POST /api/projects/{project_name}/maps/{map_name}/generate`: Main generator endpoint. Accepts up to 10 staged files, a custom refinement prompt, and a secure API key header to parse, refine, and save the map grid and path commands.
+    *   **Multipart Form**: `files: Optional[List[UploadFile]]`, `custom_prompt: Optional[str]`
+    *   **Headers**: `X-Gemini-API-Key: Optional[str]`
+
+---
+
+## 6. Getting Started & Local Setup
 
 ### Prerequisites
 *   Python 3.10+
-*   Node.js (optional, for hosting references)
 *   Git (for version control)
 *   Ollama (optional, for local fallback processing)
 
@@ -129,12 +164,17 @@ The platform incorporates comprehensive security defenses to mitigate all **100 
 
 5.  **Run Automated Pathfinding Tests**:
     ```bash
-    $env:PYTHONPATH="."; python tests/test_navigation.py
+    python -m unittest discover -s tests
+    ```
+
+6.  **Run Programmatic Workspace API Verification**:
+    ```bash
+    python scratch/test_workspace_apis.py
     ```
 
 ---
 
-## 6. Production Deployment Guidelines
+## 7. Production Deployment Guidelines
 
 For production hosting, follow these guidelines to ensure maximum security:
 
