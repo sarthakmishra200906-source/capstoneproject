@@ -1218,4 +1218,55 @@ input:checked + .slider:before {
     color: var(--accent-red);
 }
 
+/* API Key Disclaimer & Terms Block */
+.api-key-disclaimer-block {
+    margin-top: 10px;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    transition: all 0.3s ease;
+}
+
+.api-key-disclaimer-block.hidden {
+    display: none !important;
+    opacity: 0;
+}
+
+.disclaimer-text {
+    line-height: 1.45;
+    margin-bottom: 8px;
+    text-align: justify;
+}
+
+.disclaimer-text strong {
+    color: var(--accent-blue);
+}
+
+.checkbox-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    user-select: none;
+    color: var(--text-primary);
+    font-weight: 500;
+    margin-top: 4px;
+}
+
+.checkbox-container input {
+    cursor: pointer;
+    accent-color: var(--accent-blue);
+    width: 13px;
+    height: 13px;
+    margin: 0;
+}
+
+.checkbox-label {
+    font-size: 0.75rem;
+}
+
+
 

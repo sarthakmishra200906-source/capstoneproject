@@ -228,6 +228,21 @@ function setupEventListeners() {
                     .catch(err => {
                         console.error("Failed to copy text: ", err);
                     });
+    }
+    
+    // API Key Disclaimer toggle listener [NEW]
+    const apiKeyInput = document.getElementById("sys-param-token");
+    const disclaimerBlock = document.getElementById("api-key-disclaimer-block");
+    if (apiKeyInput && disclaimerBlock) {
+        apiKeyInput.addEventListener("input", () => {
+            const hasKey = apiKeyInput.value.trim().length > 0;
+            if (hasKey) {
+                disclaimerBlock.classList.remove("hidden");
+            } else {
+                disclaimerBlock.classList.add("hidden");
+                // Uncheck when hidden/cleared
+                const chk = document.getElementById("accept-api-terms");
+                if (chk) chk.checked = false;
             }
         });
     }
@@ -269,6 +284,15 @@ function logToTerminal(text, type = "system") {
 
 // Trigger Multi-Agent Orchestration or Multimodal Upload on Backend
 async function triggerAgentOrchestration() {
+    const userApiKey = document.getElementById("sys-param-token")?.value.trim();
+    const acceptTerms = document.getElementById("accept-api-terms")?.checked;
+    
+    if (userApiKey && !acceptTerms) {
+        logToTerminal("ERROR: You have entered a personal API key but have not accepted the Terms & Conditions. Please read and check the agreement box below the API key field to proceed.", "error");
+        alert("Please read and accept the Terms & Conditions to proceed with using your personal API Key.");
+        return;
+    }
+
     const prompt = document.getElementById("prompt-input").value.trim();
     
     // Reset UI state

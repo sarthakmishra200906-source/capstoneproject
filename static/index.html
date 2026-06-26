@@ -59,6 +59,17 @@
                         <input type="password" id="sys-param-token" placeholder="Enter API key for cloud parsing (optional)..." class="api-key-input" autocomplete="off" spellcheck="false" />
                         <span class="api-key-tooltip" title="Your API key is sent via secure headers and never stored. If left blank, local Ollama is used."><i class="fa-solid fa-circle-question"></i></span>
                     </div>
+                    
+                    <!-- Terms & Conditions Disclaimer Block [NEW] -->
+                    <div id="api-key-disclaimer-block" class="api-key-disclaimer-block hidden">
+                        <div class="disclaimer-text">
+                            <strong>Notice & Agreement:</strong> Your key is processed purely in local volatile memory and is never saved, logged, or stored. By checking the box below, you acknowledge that you are using your own credentials and accept full responsibility for any tokens/costs consumed on your personal Google AI Studio account. This software is provided "as-is" without any warranties.
+                        </div>
+                        <label class="checkbox-container">
+                            <input type="checkbox" id="accept-api-terms" />
+                            <span class="checkbox-label">I accept the Terms & Conditions</span>
+                        </label>
+                    </div>
                 </div>
 
                 <!-- Workspace Manager [NEW] -->
