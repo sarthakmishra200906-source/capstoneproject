@@ -1748,108 +1748,161 @@ function initializeSupabase(url, key) {
     });
 }
 
+// ─── Stage-validated Supabase config check ─────────────────────────────────
 /**
- * Returns true if the given Supabase URL and key look like real credentials.
- * Rejects empty strings, null, and known placeholder patterns.
+ * STAGE 1: checks for completely missing strings.
+ * STAGE 2: catches default dashboard placeholder strings.
+ * STAGE 3: verifies URL is structurally valid.
+ * Returns { valid: bool, reason: string }
  */
 function isValidSupabaseConfig(url, key) {
-    if (!url || !key) return false;
-    if (url.includes("your-project-id") || url.includes("example")) return false;
-    if (key.includes("your-") || key.includes("anon-key") || key.length < 20) return false;
-    try { new URL(url); } catch { return false; }
-    return true;
+    // STAGE 1 — Missing entirely
+    if (!url || !key) {
+        return { valid: false, reason: "MISSING" };
+    }
+    // STAGE 2 — Placeholder / default value detection
+    const PLACEHOLDER_PATTERNS = [
+        "your-project-id", "your-project-ref", "your-public-anon-key",
+        "your-", "example.com", "placeholder", "xyzyourrealid"
+    ];
+    for (const pattern of PLACEHOLDER_PATTERNS) {
+        if (url.toLowerCase().includes(pattern) || key.toLowerCase().includes(pattern)) {
+            return { valid: false, reason: "PLACEHOLDER" };
+        }
+    }
+    // STAGE 3 — Must parse as a real HTTPS URL and key must look like a JWT
+    try { new URL(url); } catch { return { valid: false, reason: "INVALID_URL" }; }
+    if (!url.startsWith("https://")) return { valid: false, reason: "NOT_HTTPS" };
+    if (key.length < 30) return { valid: false, reason: "KEY_TOO_SHORT" };
+    return { valid: true, reason: "OK" };
 }
 
-// Initialize Supabase Auth client and load configurations
+/**
+ * Shows a status banner in the auth card without hiding the form.
+ * This lets the user still enter custom Supabase credentials inline.
+ */
+function showConfigWarningUI(reason) {
+    const existing = document.getElementById("auth-status-banner");
+    if (existing) return; // already shown
+
+    const messages = {
+        MISSING:    "⚠️ No Supabase credentials found. You are in Local Offline Mode.",
+        PLACEHOLDER:"⚠️ Placeholder credentials detected in .env — using Local Offline Mode.",
+        INVALID_URL:"⚠️ SUPABASE_URL is not a valid URL. Check your .env file.",
+        NOT_HTTPS:  "⚠️ SUPABASE_URL must start with https://. Check your .env file.",
+        KEY_TOO_SHORT:"⚠️ Supabase anon key looks invalid (too short). Check your .env file.",
+    };
+    const msg = messages[reason] || "⚠️ Supabase configuration is invalid.";
+
+    const banner = document.createElement("div");
+    banner.id = "auth-status-banner";
+    banner.className = "auth-status-banner";
+    banner.innerHTML = `
+        <i class="fa-solid fa-triangle-exclamation"></i>
+        <span>${msg}</span>
+        <span class="offline-mode-tip">
+            You can still <strong>use the dashboard locally</strong> without an account,
+            or paste your real Supabase credentials in the
+            <i class="fa-solid fa-gears"></i> <strong>Custom Config</strong> field below and re-submit.
+        </span>
+    `;
+
+    const authCard = document.querySelector(".auth-card");
+    if (authCard) {
+        // Insert before the tabs, so form stays fully visible
+        const tabs = authCard.querySelector(".auth-tabs");
+        authCard.insertBefore(banner, tabs || authCard.firstChild);
+    }
+}
+
+// ─── Main auth bootstrap ────────────────────────────────────────────────────
 async function initAuth() {
     try {
-        // 1. Fetch default database credentials from server
-        const configResponse = await fetch("/api/supabase-config");
-        const configData = await configResponse.json();
+        // 1. Fetch public config from FastAPI backend
+        const response = await fetch("/api/supabase-config");
+        const config = await response.json();
 
-        // 2. Check if custom credentials are saved in localStorage
+        // 2. Custom credentials override (from localStorage or inline form)
         const customUrl = localStorage.getItem("custom_supabase_url");
         const customKey = localStorage.getItem("custom_supabase_key");
 
-        const url = customUrl || configData.supabase_url;
-        const key = customKey || configData.supabase_anon_key;
+        const url = customUrl || config.SUPABASE_URL || config.supabase_url || "";
+        const key = customKey || config.SUPABASE_PUBLISHABLE_KEY || config.SUPABASE_ANON_KEY || config.supabase_anon_key || "";
 
-        // 3. Populate custom fields in UI if they exist
-        if (customUrl) {
-            const el = document.getElementById("db-url");
-            if (el) el.value = customUrl;
-        }
-        if (customKey) {
-            const el = document.getElementById("db-key");
-            if (el) el.value = customKey;
-        }
+        // 3. Restore custom field values if previously entered
+        if (customUrl) { const el = document.getElementById("db-url"); if (el) el.value = customUrl; }
+        if (customKey) { const el = document.getElementById("db-key"); if (el) el.value = customKey; }
 
-        // 4. If credentials are missing OR look like placeholders → Offline Dev Mode
-        if (!isValidSupabaseConfig(url, key)) {
-            console.log("Supabase credentials missing or placeholder. Activating Offline Local Dev Mode.");
+        // 4. Run 3-stage validation
+        const configCheck = isValidSupabaseConfig(url, key);
+
+        if (!configCheck.valid) {
+            // Log clearly so developer can see in console exactly why
+            console.error(`🔒 Supabase config rejected. Reason: ${configCheck.reason}`, { url, key: key ? key.slice(0, 12) + "…" : "(empty)" });
             isOfflineMode = true;
 
-            // Show login page with an offline banner so the user knows the state.
-            // Auth buttons will be replaced with an offline notice.
+            // Show warning banner above the form (form stays visible for custom creds)
+            showConfigWarningUI(configCheck.reason);
+
+            // Show login page — the form is still active for custom credential entry
             document.getElementById("login-page").classList.remove("hidden");
             document.getElementById("dashboard-page").classList.add("hidden");
-            document.getElementById("welcome-terms-modal").classList.add("hidden");
 
-            // Inject the offline mode banner into the auth card
-            const authCard = document.querySelector(".auth-card");
-            if (authCard && !document.getElementById("offline-mode-banner")) {
-                const banner = document.createElement("div");
-                banner.id = "offline-mode-banner";
-                banner.className = "offline-mode-banner";
-                banner.innerHTML = `
-                    <div class="offline-badge-header">
-                        <i class="fa-solid fa-laptop-code"></i>
-                        <strong>Offline / Local Dev Mode</strong>
-                    </div>
-                    <p>No Supabase credentials are configured. You are running in fully local, offline mode.</p>
-                    <p>All features (3D arena, map generation, projects) work <strong>without login</strong>.</p>
-                    <hr class="offline-hr"/>
-                    <p class="offline-hint">To enable cloud accounts &amp; Google Sign-In, add your real <code>SUPABASE_URL</code> and <code>SUPABASE_ANON_KEY</code> to your <code>.env</code> file, or paste them in the <i class="fa-solid fa-gears"></i> Custom Config field below, then refresh.</p>
-                    <button id="btn-enter-dashboard" class="btn-primary auth-submit-btn" style="margin-top:12px;">
-                        <i class="fa-solid fa-arrow-right"></i> Enter Dashboard (Local Mode)
-                    </button>
-                `;
-                authCard.appendChild(banner);
-
-                // Hide the regular form body and tabs
-                const formBody = authCard.querySelector(".auth-form-body");
-                const tabs = authCard.querySelector(".auth-tabs");
-                if (formBody) formBody.style.display = "none";
-                if (tabs) tabs.style.display = "none";
-
-                // Wire up the enter button
-                document.getElementById("btn-enter-dashboard").addEventListener("click", () => {
-                    document.getElementById("user-email-display").textContent = "local-dev-user@example.com";
-                    logToTerminal("SaaS Status: Entered in Offline Local Developer Mode.", "success");
-                    document.getElementById("login-page").classList.add("hidden");
-                    document.getElementById("dashboard-page").classList.remove("hidden");
-                    loadProjectsList();
-                });
-
-                // Also wire up the custom config expander so user can still enter real credentials
-                setupAuthEventListeners();
-            }
+            // Still wire up all listeners (tabs, custom config, enter-dashboard shortcut, etc.)
+            setupAuthEventListeners();
             return;
         }
 
-        // 5. Real credentials found — initialize Supabase client and full auth UI
-        initializeSupabase(url, key);
+        // 5. ✅ Valid credentials — initialize for real
+        console.log("🚀 Supabase initialized with valid environment credentials.");
+        isOfflineMode = false;
+        supabase = window.supabase.createClient(url, key);
+        window.supabaseClient = supabase; // alias for compatibility
+
+        supabase.auth.onAuthStateChange(async (event, session) => {
+            if (session) {
+                supabaseSession = session;
+                sessionToken = session.access_token;
+                userEmail = session.user.email;
+                document.getElementById("user-email-display").textContent = userEmail;
+
+                const termsAcceptedAt = session.user.user_metadata?.terms_accepted_at;
+                if (termsAcceptedAt) {
+                    document.getElementById("login-page").classList.add("hidden");
+                    document.getElementById("dashboard-page").classList.remove("hidden");
+                    document.getElementById("welcome-terms-modal").classList.add("hidden");
+                    await loadProjectsList();
+                } else {
+                    document.getElementById("login-page").classList.add("hidden");
+                    document.getElementById("dashboard-page").classList.remove("hidden");
+                    document.getElementById("welcome-terms-modal").classList.remove("hidden");
+                    const btnAccept = document.getElementById("btn-accept-welcome");
+                    if (btnAccept) btnAccept.disabled = true;
+                    const chkAccept = document.getElementById("chk-accept-welcome-terms");
+                    if (chkAccept) chkAccept.checked = false;
+                }
+            } else {
+                supabaseSession = null;
+                sessionToken = "";
+                userEmail = "";
+                document.getElementById("login-page").classList.remove("hidden");
+                document.getElementById("dashboard-page").classList.add("hidden");
+            }
+        });
+
         setupAuthEventListeners();
 
     } catch (err) {
-        console.error("Auth system initialization failure:", err);
-        logToTerminal("Auth Error: Booting into Offline Dev fallback mode.", "error");
+        console.error("🔴 Fatal auth system initialization failure:", err);
+        logToTerminal("Auth Error: Failed to init auth. Entering offline fallback.", "error");
         isOfflineMode = true;
-        document.getElementById("login-page").classList.add("hidden");
-        document.getElementById("dashboard-page").classList.remove("hidden");
-        await loadProjectsList();
+        showConfigWarningUI("MISSING");
+        document.getElementById("login-page").classList.remove("hidden");
+        document.getElementById("dashboard-page").classList.add("hidden");
+        setupAuthEventListeners();
     }
 }
+
 
 // Bind event listeners for registration, login, tabs, and database config
 function setupAuthEventListeners() {
@@ -1950,42 +2003,88 @@ function setupAuthEventListeners() {
     
     // Handle login/register form submission
     if (authForm) {
+        // Inject a local-mode shortcut button just above the submit button (once)
+        const btnAuthSubmitEl = document.getElementById("btn-auth-submit");
+        if (btnAuthSubmitEl && isOfflineMode && !document.getElementById("btn-local-enter")) {
+            const localBtn = document.createElement("button");
+            localBtn.type = "button";
+            localBtn.id = "btn-local-enter";
+            localBtn.className = "btn-primary auth-submit-btn";
+            localBtn.style.cssText = "background: linear-gradient(135deg,#ffd600,#ff6d00); margin-bottom:8px;";
+            localBtn.innerHTML = `<i class="fa-solid fa-laptop-code"></i> Enter Dashboard (Local Mode)`;
+            localBtn.addEventListener("click", () => {
+                document.getElementById("user-email-display").textContent = "local-dev-user@example.com";
+                logToTerminal("SaaS Status: Entered Offline Local Developer Mode.", "success");
+                document.getElementById("login-page").classList.add("hidden");
+                document.getElementById("dashboard-page").classList.remove("hidden");
+                loadProjectsList();
+            });
+            btnAuthSubmitEl.parentNode.insertBefore(localBtn, btnAuthSubmitEl);
+        }
+
         authForm.addEventListener("submit", async (e) => {
             e.preventDefault();
-            
+
+            // ── Offline mode: cloud auth not possible ─────────────────────────
+            if (isOfflineMode || !supabase) {
+                // Try to re-init if user filled in custom fields
+                const dbUrl = document.getElementById("db-url")?.value.trim() || "";
+                const dbKey = document.getElementById("db-key")?.value.trim() || "";
+                const check = isValidSupabaseConfig(dbUrl, dbKey);
+
+                if (check.valid) {
+                    // User pasted real credentials — save and reload
+                    localStorage.setItem("custom_supabase_url", dbUrl);
+                    localStorage.setItem("custom_supabase_key", dbKey);
+                    alert("Credentials saved! Reloading to connect to your Supabase project...");
+                    window.location.reload();
+                    return;
+                }
+
+                alert(
+                    "You are in Offline / Local Dev Mode — cloud login is disabled.\n\n" +
+                    "To enable Register & Login:\n" +
+                    "1. Create a free Supabase project at supabase.com\n" +
+                    "2. Copy your Project URL and Anon Key\n" +
+                    "3. Paste them into the ⚙ Custom Config fields above, then click Sign In again.\n\n" +
+                    "OR — click the orange 'Enter Dashboard (Local Mode)' button to use the app without an account."
+                );
+                return;
+            }
+
             const email = document.getElementById("auth-email").value.trim();
             const password = document.getElementById("auth-password").value.trim();
 
             if (!isValidEmailAddress(email)) {
-                if (emailValidationMsg) {
-                    emailValidationMsg.classList.remove("hidden");
-                }
+                if (emailValidationMsg) emailValidationMsg.classList.remove("hidden");
                 alert("Please enter a valid email address.");
                 return;
             }
+            if (emailValidationMsg) emailValidationMsg.classList.add("hidden");
 
-            if (emailValidationMsg) {
-                emailValidationMsg.classList.add("hidden");
-            }
-            
-            // Check for custom database configuration inputs
+            // Check for inline custom database configuration
             const dbUrl = document.getElementById("db-url").value.trim();
             const dbKey = document.getElementById("db-key").value.trim();
-            
             if (dbUrl && dbKey) {
-                // If the user inputs custom db details, save to localStorage
-                localStorage.setItem("custom_supabase_url", dbUrl);
-                localStorage.setItem("custom_supabase_key", dbKey);
-                // Re-initialize client with custom db config and bind listener
-                initializeSupabase(dbUrl, dbKey);
+                const check = isValidSupabaseConfig(dbUrl, dbKey);
+                if (check.valid) {
+                    localStorage.setItem("custom_supabase_url", dbUrl);
+                    localStorage.setItem("custom_supabase_key", dbKey);
+                    supabase = window.supabase.createClient(dbUrl, dbKey);
+                    window.supabaseClient = supabase;
+                    isOfflineMode = false;
+                } else {
+                    alert(`Custom Supabase config invalid (${check.reason}). Please check your URL and key.`);
+                    return;
+                }
             } else {
                 localStorage.removeItem("custom_supabase_url");
                 localStorage.removeItem("custom_supabase_key");
             }
-            
+
             btnAuthSubmit.disabled = true;
             btnAuthSubmit.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Processing...`;
-            
+
             try {
                 if (activeAuthMode === "login") {
                     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
@@ -2004,13 +2103,13 @@ function setupAuthEventListeners() {
                         }
                     });
                     if (error) throw error;
-                    
+
                     if (data.session) {
-                        logToTerminal(`Account registered and logged in successfully!`, "success");
+                        logToTerminal("Account registered and logged in successfully!", "success");
                     } else {
-                        alert("Registration successful! Please verify the inbox you entered, then sign in from the confirmation email.");
+                        alert("Registration successful! Please check your inbox and click the confirmation email, then sign in.");
                         logToTerminal("Registration successful! Email verification pending.", "success");
-                        tabLogin.click();
+                        if (tabLogin) tabLogin.click();
                     }
                 }
             } catch (err) {
@@ -2018,14 +2117,13 @@ function setupAuthEventListeners() {
                 logToTerminal(`Auth Error: ${err.message}`, "error");
             } finally {
                 btnAuthSubmit.disabled = false;
-                if (activeAuthMode === "login") {
-                    btnAuthSubmit.innerHTML = `<i class="fa-solid fa-right-to-bracket"></i> Sign In`;
-                } else {
-                    btnAuthSubmit.innerHTML = `<i class="fa-solid fa-user-plus"></i> Register`;
-                }
+                btnAuthSubmit.innerHTML = activeAuthMode === "login"
+                    ? `<i class="fa-solid fa-right-to-bracket"></i> Sign In`
+                    : `<i class="fa-solid fa-user-plus"></i> Register`;
             }
         });
     }
+
     
     // Handle User Sign Out
     if (btnLogout) {
