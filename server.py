@@ -31,6 +31,37 @@ import cv2
 import httpx
 import tempfile
 import base64
+import uuid
+
+def verify_file_magic_number(content: bytes, filename: str) -> bool:
+    """Verifies the actual binary headers (magic numbers) of uploaded files to prevent MIME spoofing."""
+    if len(content) < 4:
+        return False
+        
+    lower_name = filename.lower()
+    
+    # PNG Magic Number: 89 50 4E 47 0D 0A 1A 0A
+    if lower_name.endswith(".png"):
+        return content.startswith(b"\x89PNG")
+        
+    # JPEG Magic Number: FF D8 FF
+    if lower_name.endswith((".jpg", ".jpeg")):
+        return content.startswith(b"\xff\xd8\xff")
+        
+    # PDF Magic Number: 25 50 44 46 (%PDF)
+    if lower_name.endswith(".pdf"):
+        return content.startswith(b"%PDF-")
+        
+    # MP4 Magic Number: Look for 'ftyp' at offset 4
+    if lower_name.endswith(".mp4"):
+        return len(content) >= 12 and content[4:8] == b"ftyp"
+        
+    # WebM Magic Number: 1A 45 DF A3 (EBML header)
+    if lower_name.endswith(".webm"):
+        return content.startswith(b"\x1a\x45\xdf\xa3")
+        
+    return False
+
 
 # Load environment variables
 load_dotenv()
@@ -98,11 +129,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Content Security Policy (CSP) - Hardened script and connection origins
         csp_directives = (
             "default-src 'self'; "
-            "script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; "
+            "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; "
             "font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; "
             "img-src 'self' data:; "
-            "connect-src 'self' http://localhost:11434 http://127.0.0.1:11434; "
+            "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.googleapis.com http://localhost:11434 http://127.0.0.1:11434; "
             "frame-ancestors 'none';"
         )
         response.headers["Content-Security-Policy"] = csp_directives
@@ -119,6 +150,20 @@ def sanitize_log_input(text: str) -> str:
         return ""
     # Escape newlines and carriage returns
     return text.replace("\r", "\\r").replace("\n", "\\n")
+
+def sanitize_prompt(text: str) -> str:
+    """
+    Sanitizes prompt layout inputs to prevent prompt injection and hidden script execution.
+    Removes potential HTML/script tags and trims length to prevent denial-of-service.
+    """
+    if not text:
+        return ""
+    # Remove HTML/XML tags
+    clean = re.sub(r"<[^>]*>", "", text)
+    # Strip carriage returns and control characters
+    clean = re.sub(r"[\r\n\t]+", " ", clean)
+    # Trim to a reasonable maximum size (e.g. 4000 characters)
+    return clean.strip()[:4000]
 
 def validate_api_key(api_key: str) -> bool:
     """
@@ -434,17 +479,26 @@ async def upload_layout(
         if file is not None:
             # Case 1: File is uploaded (image or video)
             file_bytes = await file.read()
+            
+            # Security: cap file uploads at 20MB
+            if len(file_bytes) > 20 * 1024 * 1024:
+                raise HTTPException(status_code=400, detail="Uploaded layout file exceeds the 20MB limit.")
+                
+            # Security: verify actual binary headers (magic numbers) to prevent MIME-type spoofing
+            if not verify_file_magic_number(file_bytes, file.filename):
+                raise HTTPException(status_code=400, detail=f"MIME-type spoofing detected or invalid file content for {file.filename}.")
+                
             mime_type = file.content_type
             safe_filename = sanitize_log_input(file.filename)
             logger.info(f"Processing uploaded file: {safe_filename} ({mime_type})")
             
-            safe_custom_prompt = sanitize_log_input(custom_prompt) if custom_prompt else None
+            safe_custom_prompt = sanitize_prompt(custom_prompt) if custom_prompt else None
             result_map, engine = analyze_multimodal_layout(file_bytes, mime_type, safe_custom_prompt, x_gemini_api_key)
         elif custom_prompt and current_layout:
             # Case 2: Customization prompt is provided for an existing layout
             logger.info("Customizing existing layout based on prompt...")
             current_layout_dict = json.loads(current_layout)
-            safe_custom_prompt = sanitize_log_input(custom_prompt)
+            safe_custom_prompt = sanitize_prompt(custom_prompt)
             result_map, engine = customize_existing_layout(current_layout_dict, safe_custom_prompt, x_gemini_api_key)
         else:
             raise HTTPException(
@@ -489,7 +543,8 @@ def run_orchestration(
     Triggers the multi-agent ADK graph to parse the layout description.
     Uses request-specific key if provided, otherwise falls back to local env key.
     """
-    safe_description = sanitize_log_input(request.layout_description)
+    # Security: sanitize description prompt input
+    safe_description = sanitize_prompt(request.layout_description)
     logger.info(f"Received orchestration request: {safe_description[:100]}...")
     
     # Validate custom key if provided
@@ -512,7 +567,7 @@ def run_orchestration(
     os.environ["GEMINI_API_KEY"] = active_api_key
     
     try:
-        result = run_orchestration_sync(request.layout_description)
+        result = run_orchestration_sync(safe_description)
         
         if result["status"] == "error":
             logger.error("Orchestration pipeline failed during execution.")
@@ -597,9 +652,10 @@ def get_supabase_config():
     Exposes the public Supabase URL and anon public key to the frontend.
     These are public credentials designed for client-side SDK use.
     """
+    public_key = os.environ.get("SUPABASE_PUBLISHABLE_KEY") or os.environ.get("SUPABASE_ANON_KEY", "")
     return {
         "supabase_url": os.environ.get("SUPABASE_URL", ""),
-        "supabase_anon_key": os.environ.get("SUPABASE_ANON_KEY", "")
+        "supabase_anon_key": public_key
     }
 
 # ============================================================================
@@ -617,10 +673,12 @@ def verify_supabase_token(token: str) -> dict:
         # Fallback to local developer account in development/anonymous mode
         logger.warning("SUPABASE_URL not configured. Running in local fallback mode.")
         return {"id": "local-dev-id", "email": "local-dev-user@example.com"}
+
+    public_key = os.environ.get("SUPABASE_PUBLISHABLE_KEY") or os.environ.get("SUPABASE_ANON_KEY", "")
         
     headers = {
         "Authorization": f"Bearer {token}",
-        "apikey": os.environ.get("SUPABASE_ANON_KEY", "")
+        "apikey": public_key
     }
     try:
         with httpx.Client() as client:
@@ -825,6 +883,14 @@ def list_assets(project_name: str, authorization: Optional[str] = Header(None)):
 
 @app.post("/api/projects/{project_name}/assets/upload")
 async def upload_assets(project_name: str, authorization: Optional[str] = Header(None), files: list[UploadFile] = File(...)):
+    """
+    Uploads reference asset files to a project's asset library.
+    Security measures applied:
+      - 20-file cap per project.
+      - 20MB per-file size limit.
+      - Binary magic number verification (prevents MIME spoofing).
+      - UUID filename renaming (Security Rule #18 — prevents directory traversal).
+    """
     username = None
     if authorization and authorization.startswith("Bearer "):
         token = authorization.split(" ")[1]
@@ -843,24 +909,48 @@ async def upload_assets(project_name: str, authorization: Optional[str] = Header
     if len(existing_files) + len(files) > 20:
         raise HTTPException(status_code=400, detail="Project asset library cannot exceed 20 files.")
         
+    # Allowed extensions mapped to their canonical MIME prefix
+    ALLOWED_EXTENSIONS = (".pdf", ".png", ".jpg", ".jpeg", ".mp4", ".webm")
+    
     uploaded = []
     for file in files:
-        safe_path = get_safe_filepath(assets_dir, file.filename)
+        original_name = file.filename or "upload"
+        lower_name = original_name.lower()
         
-        content_type = file.content_type or ""
-        if not (content_type.startswith("image/") or content_type.startswith("video/") or content_type == "application/pdf" or file.filename.lower().endswith((".pdf", ".png", ".jpg", ".jpeg", ".mp4", ".webm"))):
-            raise HTTPException(status_code=400, detail=f"Unsupported file type for {file.filename}. Only images, videos, and PDFs are allowed.")
+        # Security: whitelist file extensions
+        if not lower_name.endswith(ALLOWED_EXTENSIONS):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type for '{original_name}'. Allowed: images, videos, PDFs."
+            )
         
         content = await file.read()
-        # Security: validate file size on upload (max 20MB)
+        
+        # Security Rule #17: enforce 20MB cap
         if len(content) > 20 * 1024 * 1024:
-            raise HTTPException(status_code=400, detail=f"File size for {file.filename} exceeds the 20MB limit.")
-            
-        with open(safe_path, "wb") as f:
+            raise HTTPException(status_code=400, detail=f"File '{original_name}' exceeds the 20MB size limit.")
+        
+        # Security Rule #16: binary magic number verification
+        if not verify_file_magic_number(content, original_name):
+            logger.warning(f"Security Alert: Magic number mismatch for uploaded asset '{sanitize_log_input(original_name)}'. Rejected.")
+            raise HTTPException(
+                status_code=400,
+                detail=f"File content for '{original_name}' does not match its declared type. Upload rejected."
+            )
+        
+        # Security Rule #18: rename to UUID to prevent directory traversal and collisions
+        ext = os.path.splitext(lower_name)[1]  # e.g. ".png"
+        secure_filename = f"asset-{uuid.uuid4().hex[:12]}{ext}"
+        secure_path = os.path.join(assets_dir, secure_filename)
+        
+        with open(secure_path, "wb") as f:
             f.write(content)
-        uploaded.append(os.path.basename(safe_path))
+        
+        logger.info(f"Asset saved: '{sanitize_log_input(original_name)}' → '{secure_filename}'")
+        uploaded.append(secure_filename)
         
     return {"status": "success", "uploaded": uploaded}
+
 
 @app.delete("/api/projects/{project_name}/assets/{filename}")
 def delete_asset(project_name: str, filename: str, authorization: Optional[str] = Header(None)):

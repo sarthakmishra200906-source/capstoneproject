@@ -1684,5 +1684,70 @@ input:checked + .slider:before {
     box-shadow: 0 0 10px rgba(0, 210, 255, 0.2);
 }
 
+/* Google Sign In & Email Validation Styles */
+.auth-divider {
+    display: flex;
+    align-items: center;
+    text-align: center;
+    margin: 16px 0;
+    color: rgba(255, 255, 255, 0.2);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
 
+.auth-divider::before,
+.auth-divider::after {
+    content: '';
+    flex: 1;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
 
+.auth-divider:not(:empty)::before {
+    margin-right: 1em;
+}
+
+.auth-divider:not(:empty)::after {
+    margin-left: 1em;
+}
+
+.btn-google {
+    width: 100%;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    transition: all 0.3s ease;
+    outline: none;
+}
+
+.btn-google:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.2);
+    box-shadow: 0 0 12px rgba(255, 255, 255, 0.05);
+}
+
+.btn-google i {
+    font-size: 0.95rem;
+}
+
+.validation-msg {
+    font-size: 0.72rem;
+    color: var(--accent-red, #ff4d4d);
+    margin-top: 4px;
+    font-weight: 500;
+    transition: opacity 0.2s ease;
+}
+
+.validation-msg.hidden {
+    display: none !important;
+}

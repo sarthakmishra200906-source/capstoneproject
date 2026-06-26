@@ -90,6 +90,7 @@
                             <div class="auth-input-group">
                                 <label for="auth-email"><i class="fa-solid fa-envelope"></i> Email Address</label>
                                 <input type="email" id="auth-email" placeholder="Enter your email..." required autocomplete="email" />
+                                <span id="email-validation-msg" class="validation-msg hidden">Please enter a valid email address.</span>
                             </div>
                             
                             <div class="auth-input-group">
@@ -119,6 +120,14 @@
                             
                             <button type="submit" id="btn-auth-submit" class="btn-primary auth-submit-btn">
                                 <i class="fa-solid fa-right-to-bracket"></i> Sign In
+                            </button>
+
+                            <div class="auth-divider">
+                                <span>or</span>
+                            </div>
+
+                            <button type="button" id="btn-google-signin" class="btn-google">
+                                <i class="fa-brands fa-google"></i> Continue with Google
                             </button>
                         </form>
                     </div>

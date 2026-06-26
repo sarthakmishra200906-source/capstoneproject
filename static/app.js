@@ -39,9 +39,35 @@ let stagedFiles = []; // Array of File objects staged for map generation (max 10
 
 // Supabase SaaS State [NEW]
 let supabase = null;
+let supabaseSession = null;
 let sessionToken = "";
 let userEmail = "";
 let isOfflineMode = false;
+
+function isValidEmailAddress(email) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+async function handleGoogleSignIn() {
+    const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+            // Dynamically scales whether you're testing on localhost or hosted URL
+            redirectTo: `${window.location.origin}/dashboard`
+        }
+    });
+
+    if (error) {
+        console.error("Google Sign-In Error:", error.message);
+        alert("Google Login Error: " + error.message);
+        return;
+    }
+
+    // CRITICAL MISSING PIECE: Force the browser to jump to Google's login screen
+    if (data?.url) {
+        window.location.assign(data.url);
+    }
+}
 
 // Presets Definition
 const PRESETS = {
@@ -1630,8 +1656,97 @@ async function secureFetch(url, options = {}) {
 }
 
 // ============================================================================
+// SaaS AUTH UTILITY HELPERS
+// ============================================================================
+
+/**
+ * Validates an email address using a strict RFC-5322–compatible regex.
+ * Returns true only if the email has a local-part, @, and a valid domain.
+ */
+function isValidEmailAddress(email) {
+    if (!email || typeof email !== "string") return false;
+    // Standard email regex: requires local@domain.tld format
+    const re = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
+    return re.test(email.trim());
+}
+
+/**
+ * Returns the correct redirect URL after email confirmation.
+ * Points back to the current app origin so Supabase can redirect the user home.
+ */
+function getAuthRedirectUrl() {
+    return `${window.location.origin}/`;
+}
+
+/**
+ * Triggers Supabase OAuth sign-in with Google provider.
+ * Supabase handles the full OAuth redirect flow and issues a session on return.
+ * Requires Google provider to be enabled in the Supabase project dashboard:
+ *   Authentication → Providers → Google → Enable.
+ */
+async function handleGoogleSignIn() {
+    if (!supabase) throw new Error("Supabase client not initialized.");
+
+    const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+            redirectTo: getAuthRedirectUrl(),
+            queryParams: {
+                // Request access to basic profile + email scopes
+                access_type: "offline",
+                prompt: "consent"
+            }
+        }
+    });
+
+    if (error) throw error;
+    // Note: the browser will redirect to Google — no further JS runs here.
+}
+
+// ============================================================================
 // SaaS CLOUD AUTHENTICATION & SECURITY SYSTEM
 // ============================================================================
+
+// Initialize Supabase Client instance and bind auth state listener
+function initializeSupabase(url, key) {
+    isOfflineMode = false;
+    // Use window.supabase.createClient to avoid clashing with global let supabase
+    supabase = window.supabase.createClient(url, key);
+    
+    // Listen to active auth state sessions
+    supabase.auth.onAuthStateChange(async (event, session) => {
+        if (session) {
+            supabaseSession = session;
+            sessionToken = session.access_token;
+            userEmail = session.user.email;
+            document.getElementById("user-email-display").textContent = userEmail;
+            
+            // Read terms acceptance timestamp from user metadata
+            const termsAcceptedAt = session.user.user_metadata?.terms_accepted_at;
+            if (termsAcceptedAt) {
+                document.getElementById("login-page").classList.add("hidden");
+                document.getElementById("dashboard-page").classList.remove("hidden");
+                document.getElementById("welcome-terms-modal").classList.add("hidden");
+                await loadProjectsList();
+            } else {
+                // Force welcome terms modal to block access
+                document.getElementById("login-page").classList.add("hidden");
+                document.getElementById("dashboard-page").classList.remove("hidden");
+                document.getElementById("welcome-terms-modal").classList.remove("hidden");
+                const btnAccept = document.getElementById("btn-accept-welcome");
+                if (btnAccept) btnAccept.disabled = true;
+                const chkAccept = document.getElementById("chk-accept-welcome-terms");
+                if (chkAccept) chkAccept.checked = false;
+            }
+        } else {
+            supabaseSession = null;
+            sessionToken = "";
+            userEmail = "";
+            document.getElementById("login-page").classList.remove("hidden");
+            document.getElementById("dashboard-page").classList.add("hidden");
+        }
+    });
+}
 
 // Initialize Supabase Auth client and load configurations
 async function initAuth() {
@@ -1668,42 +1783,9 @@ async function initAuth() {
             return;
         }
         
-        // 5. Initialize Supabase Client
-        isOfflineMode = false;
-        supabase = supabase.createClient(url, key);
+        // 5. Initialize Supabase Client and set up listener
+        initializeSupabase(url, key);
         setupAuthEventListeners();
-        
-        // 6. Listen to active auth state sessions
-        supabase.auth.onAuthStateChange(async (event, session) => {
-            if (session) {
-                supabaseSession = session;
-                sessionToken = session.access_token;
-                userEmail = session.user.email;
-                document.getElementById("user-email-display").textContent = userEmail;
-                
-                // Read terms acceptance timestamp from user metadata
-                const termsAcceptedAt = session.user.user_metadata?.terms_accepted_at;
-                if (termsAcceptedAt) {
-                    document.getElementById("login-page").classList.add("hidden");
-                    document.getElementById("dashboard-page").classList.remove("hidden");
-                    document.getElementById("welcome-terms-modal").classList.add("hidden");
-                    await loadProjectsList();
-                } else {
-                    // Force welcome terms modal to block access
-                    document.getElementById("login-page").classList.add("hidden");
-                    document.getElementById("dashboard-page").classList.remove("hidden");
-                    document.getElementById("welcome-terms-modal").classList.remove("hidden");
-                    document.getElementById("btn-accept-welcome").disabled = true;
-                    document.getElementById("chk-accept-welcome-terms").checked = false;
-                }
-            } else {
-                supabaseSession = null;
-                sessionToken = "";
-                userEmail = "";
-                document.getElementById("login-page").classList.remove("hidden");
-                document.getElementById("dashboard-page").classList.add("hidden");
-            }
-        });
         
     } catch (err) {
         console.error("Auth system initialization failure:", err);
@@ -1723,9 +1805,11 @@ function setupAuthEventListeners() {
     const authSubtitle = document.getElementById("auth-subtitle");
     const authForm = document.getElementById("auth-form");
     const btnAuthSubmit = document.getElementById("btn-auth-submit");
+    const btnGoogleSignin = document.getElementById("btn-google-signin");
     const btnToggleDb = document.getElementById("btn-toggle-db-config");
     const customDbFields = document.getElementById("custom-db-fields");
     const btnLogout = document.getElementById("btn-logout");
+    const emailValidationMsg = document.getElementById("email-validation-msg");
     
     let activeAuthMode = "login"; // "login" or "register"
     
@@ -1756,6 +1840,42 @@ function setupAuthEventListeners() {
             customDbFields.classList.toggle("hidden");
         });
     }
+
+    const updateEmailValidation = () => {
+        if (!emailValidationMsg) return true;
+        const emailInput = document.getElementById("auth-email");
+        const email = emailInput ? emailInput.value.trim() : "";
+        const isValid = !email || isValidEmailAddress(email);
+        emailValidationMsg.classList.toggle("hidden", isValid);
+        return isValid;
+    };
+
+    const emailInput = document.getElementById("auth-email");
+    if (emailInput) {
+        emailInput.addEventListener("input", updateEmailValidation);
+        emailInput.addEventListener("blur", updateEmailValidation);
+    }
+
+    if (btnGoogleSignin) {
+        btnGoogleSignin.addEventListener("click", async () => {
+            if (!supabase) {
+                alert("Supabase is not ready yet. Please try again in a moment.");
+                return;
+            }
+
+            btnGoogleSignin.disabled = true;
+            btnGoogleSignin.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Redirecting...`;
+
+            try {
+                await handleGoogleSignIn();
+            } catch (err) {
+                alert("Google sign-in failed: " + err.message);
+                logToTerminal(`Google OAuth Error: ${err.message}`, "error");
+                btnGoogleSignin.disabled = false;
+                btnGoogleSignin.innerHTML = `<i class="fa-brands fa-google"></i> Continue with Google`;
+            }
+        });
+    }
     
     // Handle login/register form submission
     if (authForm) {
@@ -1764,6 +1884,18 @@ function setupAuthEventListeners() {
             
             const email = document.getElementById("auth-email").value.trim();
             const password = document.getElementById("auth-password").value.trim();
+
+            if (!isValidEmailAddress(email)) {
+                if (emailValidationMsg) {
+                    emailValidationMsg.classList.remove("hidden");
+                }
+                alert("Please enter a valid email address.");
+                return;
+            }
+
+            if (emailValidationMsg) {
+                emailValidationMsg.classList.add("hidden");
+            }
             
             // Check for custom database configuration inputs
             const dbUrl = document.getElementById("db-url").value.trim();
@@ -1773,8 +1905,8 @@ function setupAuthEventListeners() {
                 // If the user inputs custom db details, save to localStorage
                 localStorage.setItem("custom_supabase_url", dbUrl);
                 localStorage.setItem("custom_supabase_key", dbKey);
-                // Re-initialize client with custom db config
-                supabase = supabase.createClient(dbUrl, dbKey);
+                // Re-initialize client with custom db config and bind listener
+                initializeSupabase(dbUrl, dbKey);
             } else {
                 localStorage.removeItem("custom_supabase_url");
                 localStorage.removeItem("custom_supabase_key");
@@ -1793,9 +1925,10 @@ function setupAuthEventListeners() {
                         email,
                         password,
                         options: {
+                            emailRedirectTo: getAuthRedirectUrl(),
                             data: {
-                                // Default metadata empty, terms must be accepted explicitly next
-                                terms_accepted_at: null
+                                terms_accepted: true,
+                                terms_accepted_at: new Date().toISOString()
                             }
                         }
                     });
@@ -1804,7 +1937,7 @@ function setupAuthEventListeners() {
                     if (data.session) {
                         logToTerminal(`Account registered and logged in successfully!`, "success");
                     } else {
-                        alert("Registration successful! Please check your email inbox to confirm your account, then sign in.");
+                        alert("Registration successful! Please verify the inbox you entered, then sign in from the confirmation email.");
                         logToTerminal("Registration successful! Email verification pending.", "success");
                         tabLogin.click();
                     }

@@ -1,5 +1,8 @@
 # API Keys & Secrets
 .env
+.env.local
+.env.*.local
+*.local
 
 # Python Caches & Builds
 __pycache__/
