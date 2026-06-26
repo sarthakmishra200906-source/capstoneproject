@@ -1748,45 +1748,99 @@ function initializeSupabase(url, key) {
     });
 }
 
+/**
+ * Returns true if the given Supabase URL and key look like real credentials.
+ * Rejects empty strings, null, and known placeholder patterns.
+ */
+function isValidSupabaseConfig(url, key) {
+    if (!url || !key) return false;
+    if (url.includes("your-project-id") || url.includes("example")) return false;
+    if (key.includes("your-") || key.includes("anon-key") || key.length < 20) return false;
+    try { new URL(url); } catch { return false; }
+    return true;
+}
+
 // Initialize Supabase Auth client and load configurations
 async function initAuth() {
     try {
         // 1. Fetch default database credentials from server
         const configResponse = await fetch("/api/supabase-config");
         const configData = await configResponse.json();
-        
+
         // 2. Check if custom credentials are saved in localStorage
         const customUrl = localStorage.getItem("custom_supabase_url");
         const customKey = localStorage.getItem("custom_supabase_key");
-        
+
         const url = customUrl || configData.supabase_url;
         const key = customKey || configData.supabase_anon_key;
-        
+
         // 3. Populate custom fields in UI if they exist
-        if (customUrl) document.getElementById("db-url").value = customUrl;
-        if (customKey) document.getElementById("db-key").value = customKey;
-        
-        // 4. Fall back to local developer mode if no credentials exist
-        if (!url || !key) {
-            console.log("Supabase credentials not found. Activating Offline Local Dev Mode.");
+        if (customUrl) {
+            const el = document.getElementById("db-url");
+            if (el) el.value = customUrl;
+        }
+        if (customKey) {
+            const el = document.getElementById("db-key");
+            if (el) el.value = customKey;
+        }
+
+        // 4. If credentials are missing OR look like placeholders → Offline Dev Mode
+        if (!isValidSupabaseConfig(url, key)) {
+            console.log("Supabase credentials missing or placeholder. Activating Offline Local Dev Mode.");
             isOfflineMode = true;
-            document.getElementById("login-page").classList.add("hidden");
-            document.getElementById("dashboard-page").classList.remove("hidden");
+
+            // Show login page with an offline banner so the user knows the state.
+            // Auth buttons will be replaced with an offline notice.
+            document.getElementById("login-page").classList.remove("hidden");
+            document.getElementById("dashboard-page").classList.add("hidden");
             document.getElementById("welcome-terms-modal").classList.add("hidden");
-            
-            // Set dummy email for local UI display
-            document.getElementById("user-email-display").textContent = "local-dev-user@example.com";
-            logToTerminal("SaaS Status: Connected in Offline Local Developer Mode.", "success");
-            
-            // Load local projects
-            await loadProjectsList();
+
+            // Inject the offline mode banner into the auth card
+            const authCard = document.querySelector(".auth-card");
+            if (authCard && !document.getElementById("offline-mode-banner")) {
+                const banner = document.createElement("div");
+                banner.id = "offline-mode-banner";
+                banner.className = "offline-mode-banner";
+                banner.innerHTML = `
+                    <div class="offline-badge-header">
+                        <i class="fa-solid fa-laptop-code"></i>
+                        <strong>Offline / Local Dev Mode</strong>
+                    </div>
+                    <p>No Supabase credentials are configured. You are running in fully local, offline mode.</p>
+                    <p>All features (3D arena, map generation, projects) work <strong>without login</strong>.</p>
+                    <hr class="offline-hr"/>
+                    <p class="offline-hint">To enable cloud accounts &amp; Google Sign-In, add your real <code>SUPABASE_URL</code> and <code>SUPABASE_ANON_KEY</code> to your <code>.env</code> file, or paste them in the <i class="fa-solid fa-gears"></i> Custom Config field below, then refresh.</p>
+                    <button id="btn-enter-dashboard" class="btn-primary auth-submit-btn" style="margin-top:12px;">
+                        <i class="fa-solid fa-arrow-right"></i> Enter Dashboard (Local Mode)
+                    </button>
+                `;
+                authCard.appendChild(banner);
+
+                // Hide the regular form body and tabs
+                const formBody = authCard.querySelector(".auth-form-body");
+                const tabs = authCard.querySelector(".auth-tabs");
+                if (formBody) formBody.style.display = "none";
+                if (tabs) tabs.style.display = "none";
+
+                // Wire up the enter button
+                document.getElementById("btn-enter-dashboard").addEventListener("click", () => {
+                    document.getElementById("user-email-display").textContent = "local-dev-user@example.com";
+                    logToTerminal("SaaS Status: Entered in Offline Local Developer Mode.", "success");
+                    document.getElementById("login-page").classList.add("hidden");
+                    document.getElementById("dashboard-page").classList.remove("hidden");
+                    loadProjectsList();
+                });
+
+                // Also wire up the custom config expander so user can still enter real credentials
+                setupAuthEventListeners();
+            }
             return;
         }
-        
-        // 5. Initialize Supabase Client and set up listener
+
+        // 5. Real credentials found — initialize Supabase client and full auth UI
         initializeSupabase(url, key);
         setupAuthEventListeners();
-        
+
     } catch (err) {
         console.error("Auth system initialization failure:", err);
         logToTerminal("Auth Error: Booting into Offline Dev fallback mode.", "error");
@@ -1858,21 +1912,38 @@ function setupAuthEventListeners() {
 
     if (btnGoogleSignin) {
         btnGoogleSignin.addEventListener("click", async () => {
-            if (!supabase) {
-                alert("Supabase is not ready yet. Please try again in a moment.");
+            // Offline mode: Google OAuth is impossible without a real Supabase project
+            if (isOfflineMode || !supabase) {
+                alert(
+                    "Google Sign-In requires a real Supabase project.\n\n" +
+                    "Steps to enable it:\n" +
+                    "1. Create a free project at supabase.com\n" +
+                    "2. Go to Authentication → Providers → Google → Enable\n" +
+                    "3. Add your Google OAuth Client ID & Secret from console.cloud.google.com\n" +
+                    "4. Paste your Supabase URL + Anon Key into the ⚙ Custom Config field, then refresh."
+                );
                 return;
             }
 
             btnGoogleSignin.disabled = true;
-            btnGoogleSignin.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Redirecting...`;
+            btnGoogleSignin.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Redirecting to Google...`;
 
             try {
                 await handleGoogleSignIn();
             } catch (err) {
-                alert("Google sign-in failed: " + err.message);
-                logToTerminal(`Google OAuth Error: ${err.message}`, "error");
+                const msg = err.message || "Unknown error";
+                // Common failure: Google provider not enabled in Supabase dashboard
+                if (msg.toLowerCase().includes("provider") || msg.toLowerCase().includes("not enabled")) {
+                    alert(
+                        "Google Sign-In Error: Provider not enabled.\n\n" +
+                        "Go to your Supabase Dashboard → Authentication → Providers → Google and enable it."
+                    );
+                } else {
+                    alert("Google sign-in failed: " + msg);
+                }
+                logToTerminal(`Google OAuth Error: ${msg}`, "error");
                 btnGoogleSignin.disabled = false;
-                btnGoogleSignin.innerHTML = `<i class="fa-brands fa-google"></i> Continue with Google`;
+                btnGoogleSignin.innerHTML = `<i class="fa-brands fa-google"></i> Sign in with Google`;
             }
         });
     }
