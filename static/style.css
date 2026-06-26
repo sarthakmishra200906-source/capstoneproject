@@ -1899,3 +1899,304 @@ input:checked + .slider:before {
     color: var(--accent-blue);
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   LOGIN / LANDING PAGE — Full Styles
+   ═══════════════════════════════════════════════════════════════════════ */
+
+#login-page {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    overflow-y: auto;
+}
+
+.landing-portal-wrapper {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 40px;
+    max-width: 1100px;
+    width: 100%;
+    align-items: center;
+}
+
+@media (max-width: 800px) {
+    .landing-portal-wrapper { grid-template-columns: 1fr; }
+    .portal-left-pane { display: none; }
+}
+
+/* ── Left branding pane ──────────────────────────── */
+.portal-left-pane {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    padding: 20px 0;
+}
+
+.portal-brand {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.portal-brand h2 {
+    font-family: var(--font-head);
+    font-size: 2rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: var(--text-primary);
+}
+
+.portal-brand h2 span { color: var(--accent-blue); }
+
+.brand-glowing-icon {
+    font-size: 2.5rem;
+    color: var(--accent-blue);
+    filter: drop-shadow(0 0 14px var(--accent-blue));
+    animation: iconPulse 3s infinite alternate;
+}
+
+.portal-tagline {
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent-green);
+}
+
+.portal-description {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    line-height: 1.7;
+}
+
+.portal-features-list {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.portal-feature-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+}
+
+.feature-icon {
+    font-size: 1.2rem;
+    color: var(--accent-blue);
+    margin-top: 3px;
+    flex-shrink: 0;
+    filter: drop-shadow(0 0 6px rgba(0,210,255,0.4));
+}
+
+.feature-info h4 {
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 3px;
+}
+
+.feature-info p {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.portal-footer-credits {
+    font-size: 0.72rem;
+    color: rgba(255,255,255,0.25);
+    margin-top: 12px;
+}
+
+/* ── Right pane ──────────────────────────────────── */
+.portal-right-pane {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* ── Auth card ───────────────────────────────────── */
+.auth-card {
+    width: 100%;
+    max-width: 440px;
+    background: rgba(16, 20, 40, 0.80);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 20px;
+    padding: 32px;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(0,210,255,0.04) inset;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ── Sign In / Register tabs — THIS IS THE KEY FIX ── */
+.auth-tabs {
+    display: flex;
+    gap: 4px;
+    background: rgba(255,255,255,0.04);
+    border-radius: 10px;
+    padding: 4px;
+    margin-bottom: 22px;
+}
+
+.auth-tab {
+    flex: 1;
+    padding: 10px 0;
+    border: none;
+    background: transparent;
+    border-radius: 7px;
+    color: var(--text-secondary);
+    font-family: var(--font-body);
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    letter-spacing: 0.03em;
+    transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* Active tab: filled cyan — makes Register clearly selected */
+.auth-tab.active {
+    background: var(--accent-blue);
+    color: #000 !important;
+    box-shadow: 0 2px 14px rgba(0,210,255,0.4);
+}
+
+.auth-tab:hover:not(.active) {
+    background: rgba(255,255,255,0.08);
+    color: var(--text-primary);
+}
+
+/* ── Form content ─────────────────────────────────── */
+#auth-title {
+    font-family: var(--font-head);
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+
+.auth-subtitle-text {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    margin-bottom: 20px;
+    line-height: 1.5;
+}
+
+/* ── Input groups ─────────────────────────────────── */
+.auth-input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin-bottom: 14px;
+}
+
+.auth-input-group label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.auth-input-group input {
+    width: 100%;
+    padding: 11px 14px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px;
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    font-size: 0.92rem;
+    outline: none;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.auth-input-group input:focus {
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 0 3px rgba(0,210,255,0.12);
+}
+
+.auth-input-group input::placeholder {
+    color: rgba(255,255,255,0.2);
+}
+
+/* ── Submit button ────────────────────────────────── */
+.auth-submit-btn {
+    width: 100%;
+    padding: 13px 16px;
+    border: none;
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--accent-blue), #0095b8);
+    color: #000;
+    font-family: var(--font-body);
+    font-size: 0.95rem;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 8px;
+    transition: opacity 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
+    box-shadow: 0 4px 20px rgba(0,210,255,0.25);
+}
+
+.auth-submit-btn:hover:not(:disabled) {
+    opacity: 0.9;
+    transform: translateY(-1px);
+    box-shadow: 0 6px 24px rgba(0,210,255,0.4);
+}
+
+.auth-submit-btn:active:not(:disabled) { transform: translateY(0); }
+.auth-submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Custom DB config expander ────────────────────── */
+.custom-db-settings-wrapper {
+    margin-top: 10px;
+    margin-bottom: 4px;
+}
+
+.btn-text-link {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-family: var(--font-body);
+    font-size: 0.75rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 0;
+    transition: color 0.2s ease;
+}
+
+.btn-text-link:hover { color: var(--accent-blue); }
+
+.custom-db-fields {
+    margin-top: 10px;
+    padding: 14px;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.custom-db-fields.hidden { display: none; }
+
+.db-config-help {
+    font-size: 0.72rem;
+    color: rgba(255,255,255,0.2);
+    margin-top: 8px;
+    line-height: 1.5;
+}
+
+.mt-8  { margin-top: 8px; }
+.mt-12 { margin-top: 12px; }

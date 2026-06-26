@@ -1917,6 +1917,8 @@ function setupAuthEventListeners() {
     const customDbFields = document.getElementById("custom-db-fields");
     const btnLogout = document.getElementById("btn-logout");
     const emailValidationMsg = document.getElementById("email-validation-msg");
+    const registerNameGroup = document.getElementById("register-name-group");
+    const registerConfirmGroup = document.getElementById("register-confirm-group");
     
     let activeAuthMode = "login"; // "login" or "register"
     
@@ -1929,6 +1931,12 @@ function setupAuthEventListeners() {
             authTitle.textContent = "Welcome Back";
             authSubtitle.textContent = "Sign in to access your secure persistent workspaces.";
             btnAuthSubmit.innerHTML = `<i class="fa-solid fa-right-to-bracket"></i> Sign In`;
+            if (registerNameGroup) registerNameGroup.classList.add("hidden");
+            if (registerConfirmGroup) registerConfirmGroup.classList.add("hidden");
+            const nameInput = document.getElementById("auth-name");
+            const confirmInput = document.getElementById("auth-confirm-password");
+            if (nameInput) nameInput.required = false;
+            if (confirmInput) confirmInput.required = false;
         });
         
         tabRegister.addEventListener("click", () => {
@@ -1938,6 +1946,12 @@ function setupAuthEventListeners() {
             authTitle.textContent = "Create Account";
             authSubtitle.textContent = "Register a secure profile to persist maps and assets.";
             btnAuthSubmit.innerHTML = `<i class="fa-solid fa-user-plus"></i> Register`;
+            if (registerNameGroup) registerNameGroup.classList.remove("hidden");
+            if (registerConfirmGroup) registerConfirmGroup.classList.remove("hidden");
+            const nameInput = document.getElementById("auth-name");
+            const confirmInput = document.getElementById("auth-confirm-password");
+            if (nameInput) nameInput.required = true;
+            if (confirmInput) confirmInput.required = true;
         });
     }
     
@@ -2062,6 +2076,16 @@ function setupAuthEventListeners() {
             }
             if (emailValidationMsg) emailValidationMsg.classList.add("hidden");
 
+            if (activeAuthMode === "register") {
+                const confirmPassword = document.getElementById("auth-confirm-password")?.value.trim();
+                if (password !== confirmPassword) {
+                    alert("Passwords do not match. Please re-enter.");
+                    return;
+                }
+            }
+
+            const fullName = document.getElementById("auth-name")?.value.trim() || "";
+
             // Check for inline custom database configuration
             const dbUrl = document.getElementById("db-url").value.trim();
             const dbKey = document.getElementById("db-key").value.trim();
@@ -2097,6 +2121,7 @@ function setupAuthEventListeners() {
                         options: {
                             emailRedirectTo: getAuthRedirectUrl(),
                             data: {
+                                full_name: fullName,
                                 terms_accepted: true,
                                 terms_accepted_at: new Date().toISOString()
                             }

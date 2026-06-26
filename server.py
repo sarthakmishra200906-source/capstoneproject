@@ -652,6 +652,7 @@ def get_supabase_config():
     Exposes the public Supabase URL and anon public key to the frontend.
     These are public credentials designed for client-side SDK use.
     """
+    load_dotenv(override=True)
     public_key = os.environ.get("SUPABASE_PUBLISHABLE_KEY") or os.environ.get("SUPABASE_ANON_KEY", "")
     return {
         "supabase_url": os.environ.get("SUPABASE_URL", ""),
