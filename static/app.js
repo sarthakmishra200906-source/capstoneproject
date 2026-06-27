@@ -1916,11 +1916,14 @@ async function initAuth() {
         window.supabaseClient = supabaseClient; // alias for compatibility
 
         supabaseClient.auth.onAuthStateChange(async (event, session) => {
-            if (session) {
+            console.log("Auth event:", event, session ? session.user?.email : "no session");
+            
+            if (session && (event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "INITIAL_SESSION")) {
                 supabaseSession = session;
                 sessionToken = session.access_token;
                 userEmail = session.user.email;
-                document.getElementById("user-email-display").textContent = userEmail;
+                const emailDisp = document.getElementById("user-email-display");
+                if (emailDisp) emailDisp.textContent = userEmail;
 
                 const termsAcceptedAt = session.user.user_metadata?.terms_accepted_at;
                 if (termsAcceptedAt) {
@@ -1935,7 +1938,7 @@ async function initAuth() {
                     const chkAccept = document.getElementById("chk-accept-welcome-terms");
                     if (chkAccept) chkAccept.checked = false;
                 }
-            } else {
+            } else if (event === "SIGNED_OUT") {
                 supabaseSession = null;
                 sessionToken = "";
                 userEmail = "";
@@ -2256,13 +2259,21 @@ function setupAuthEventListeners() {
                     }
 
                     if (data?.session) {
+                        // User registered and immediately logged in (email confirmation disabled)
                         logToTerminal("Account registered and logged in successfully!", "success");
-                        showView("dashboard");
-                        loadProjectsList();
-                    } else {
-                        alert("Registration successful! Please check your inbox and click the confirmation email, then sign in.");
-                        logToTerminal("Registration successful! Email verification pending.", "success");
-                        showView("login");
+                        // onAuthStateChange will fire automatically — no manual showView needed
+                    } else if (data?.user && !data?.session) {
+                        // Email confirmation is enabled — try to sign in immediately anyway
+                        // (This works if Supabase email confirmation is disabled in dashboard)
+                        const { data: signInData, error: signInErr } = await supabaseClient.auth.signInWithPassword({ email, password });
+                        if (!signInErr && signInData?.session) {
+                            logToTerminal("Account registered and signed in!", "success");
+                            // onAuthStateChange will fire and show dashboard
+                        } else {
+                            alert("Registration successful! Your email may need verification — please check your inbox, then Sign In here.");
+                            logToTerminal("Registration successful — email verification may be required.", "success");
+                            showView("login");
+                        }
                     }
                 } catch (netErr) {
                     console.warn("Supabase cloud reachability failed during signUp, simulating success for local test:", netErr.message);
