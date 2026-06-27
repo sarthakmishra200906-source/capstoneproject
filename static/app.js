@@ -323,6 +323,8 @@ function setupEventListeners() {
                     if (error) throw error;
                     welcomeModal.classList.add("hidden");
                     logToTerminal("Terms of Service and Privacy Agreement accepted. Welcome to the dashboard!", "success");
+                    // Explicitly show dashboard and load projects (USER_UPDATED won't do this)
+                    showView("dashboard");
                     await loadProjectsList();
                 }
             } catch (err) {
@@ -1918,12 +1920,18 @@ async function initAuth() {
         supabaseClient.auth.onAuthStateChange(async (event, session) => {
             console.log("Auth event:", event, session ? session.user?.email : "no session");
             
-            if (session && (event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "INITIAL_SESSION")) {
+            if (session && (event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "INITIAL_SESSION" || event === "USER_UPDATED")) {
                 supabaseSession = session;
                 sessionToken = session.access_token;
                 userEmail = session.user.email;
                 const emailDisp = document.getElementById("user-email-display");
                 if (emailDisp) emailDisp.textContent = userEmail;
+
+                // On USER_UPDATED (e.g. after terms accepted), just stay on dashboard - don't re-evaluate modal
+                if (event === "USER_UPDATED") {
+                    // Already on dashboard, no action needed
+                    return;
+                }
 
                 const termsAcceptedAt = session.user.user_metadata?.terms_accepted_at;
                 if (termsAcceptedAt) {
@@ -2238,17 +2246,20 @@ function setupAuthEventListeners() {
                         }
                     });
                     if (error) {
-                        // If user already exists, auto-sign them in instead
-                        if (error.message?.toLowerCase().includes("already registered") || 
-                            error.message?.toLowerCase().includes("already been registered") ||
-                            error.code === "user_already_exists") {
+                        // Handle 422 / already-registered errors gracefully
+                        const msg = error.message?.toLowerCase() || "";
+                        const isAlreadyRegistered = 
+                            msg.includes("already registered") || 
+                            msg.includes("already been registered") ||
+                            error.code === "user_already_exists" ||
+                            error.status === 422;
+                        if (isAlreadyRegistered) {
                             const { data: signInData, error: signInErr } = await supabaseClient.auth.signInWithPassword({ email, password });
                             if (!signInErr && signInData?.session) {
                                 logToTerminal(`Welcome back ${email}! Signed in to existing account.`, "success");
-                                // onAuthStateChange will route to dashboard
-                                return;
+                                return; // onAuthStateChange will route to dashboard
                             } else {
-                                alert("This email is already registered. Please Sign In instead.");
+                                alert("This email is already registered. Please use Sign In with the correct password, or use Continue with Google.");
                                 showView("login");
                                 return;
                             }
