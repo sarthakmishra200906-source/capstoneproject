@@ -63,13 +63,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     // 1. Initialize Auth and Auth Event Listeners first so they are guaranteed to work
     // even if Three.js/WebGL fails to initialize on the user's system.
     try {
-        setupAuthEventListeners();
-    } catch (authEvtErr) {
-        console.error("Auth event listeners setup failed:", authEvtErr);
-    }
-
-    try {
-        await initAuth(); // Initialize Supabase / Auth [NEW]
+        await initAuth(); // Initialize Supabase / Auth — also calls setupAuthEventListeners internally
     } catch (authInitErr) {
         console.error("Auth initialization failed:", authInitErr);
     }
@@ -1767,45 +1761,12 @@ async function handleGoogleSignIn() {
 // ============================================================================
 
 // Initialize Supabase Client instance and bind auth state listener
+// initializeSupabase is no longer used — auth is fully handled by initAuth() below.
+// Kept as stub to avoid any stale references breaking.
 function initializeSupabase(url, key) {
-    isOfflineMode = false;
-    // Use window.supabase.createClient to avoid clashing with global let supabase
-    supabaseClient = window.supabase.createClient(url, key);
-    
-    // Listen to active auth state sessions
-    supabaseClient.auth.onAuthStateChange(async (event, session) => {
-        if (session) {
-            supabaseSession = session;
-            sessionToken = session.access_token;
-            userEmail = session.user.email;
-            document.getElementById("user-email-display").textContent = userEmail;
-            
-            // Read terms acceptance timestamp from user metadata
-            const termsAcceptedAt = session.user.user_metadata?.terms_accepted_at;
-            if (termsAcceptedAt) {
-                document.getElementById("login-page").classList.add("hidden");
-                document.getElementById("dashboard-page").classList.remove("hidden");
-                document.getElementById("welcome-terms-modal").classList.add("hidden");
-                await loadProjectsList();
-            } else {
-                // Force welcome terms modal to block access
-                document.getElementById("login-page").classList.add("hidden");
-                document.getElementById("dashboard-page").classList.remove("hidden");
-                document.getElementById("welcome-terms-modal").classList.remove("hidden");
-                const btnAccept = document.getElementById("btn-accept-welcome");
-                if (btnAccept) btnAccept.disabled = true;
-                const chkAccept = document.getElementById("chk-accept-welcome-terms");
-                if (chkAccept) chkAccept.checked = false;
-            }
-        } else {
-            supabaseSession = null;
-            sessionToken = "";
-            userEmail = "";
-            document.getElementById("login-page").classList.remove("hidden");
-            document.getElementById("dashboard-page").classList.add("hidden");
-        }
-    });
+    console.warn("initializeSupabase() is deprecated. Use initAuth() instead.");
 }
+
 
 // ─── Stage-validated Supabase config check ─────────────────────────────────
 /**
