@@ -25,7 +25,7 @@
     <!-- FontAwesome for Icons with Subresource Integrity -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous">
     <!-- Custom Style -->
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=3.0">
     <!-- Three.js and OrbitControls with Subresource Integrity -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" integrity="sha384-CI3ELBVUz9XQO+97x6nwMDPosPR5XvsxW2ua7N1Xeygeh1IxtgqtCkGfQY9WWdHu" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js" integrity="sha384-wagZhIFgY4hD+7awjQjR4e2E294y6J2HSnd8eTNc15ZubTeQeVRZwhQJ+W6hnBsf" crossorigin="anonymous"></script>
@@ -33,19 +33,33 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
-    <!-- SaaS Welcome Landing & Auth Portal [NEW] -->
-    <div id="login-page">
-        <div class="landing-portal-wrapper">
-            <!-- Left Pane: Platform Overview -->
-            <div class="portal-left-pane">
-                <div class="portal-brand">
-                    <i class="fa-solid fa-robot brand-glowing-icon"></i>
-                    <h2>SPATIAL<span>ROBOTICS</span></h2>
-                </div>
-                <div class="portal-tagline">Autonomous 3D Arena & Multi-Agent Pathfinding</div>
-                <div class="portal-description">
-                    Welcome to the ultimate spatial computing simulation workspace. Designed as an advanced robotics capstone project for the Kaggle 5-Day Learning Session powered by Google, this platform leverages state-of-the-art AI to translate human spaces into physical machine intelligence.
-                </div>
+    <!-- SaaS Welcome Landing View -->
+    <div id="landing-page">
+        <!-- Navigation Header Bar -->
+        <header class="navbar glass-card">
+            <div class="navbar-brand">
+                <i class="fa-solid fa-robot brand-glowing-icon"></i>
+                <h2>SPATIAL<span>ROBOTICS</span></h2>
+            </div>
+            <div class="navbar-actions">
+                <button type="button" id="btn-nav-signin" class="btn-secondary-glow"><i class="fa-solid fa-right-to-bracket"></i> Sign In</button>
+                <button type="button" id="btn-nav-register" class="btn-primary"><i class="fa-solid fa-user-plus"></i> Register</button>
+            </div>
+        </header>
+
+        <!-- Main Landing Content -->
+        <div class="landing-hero-wrapper">
+            <div class="landing-hero-content">
+                <div class="hero-tagline">Autonomous 3D Arena & Multi-Agent Pathfinding</div>
+                <h1 class="hero-title">Translate Human Spaces into Machine Intelligence</h1>
+                <p class="hero-description">
+                    Welcome to the ultimate spatial computing simulation workspace. Designed as an advanced robotics capstone project for the Kaggle 5-Day Learning Session powered by Google, this platform leverages state-of-the-art AI to map coordinates and coordinate robot locomotion smoothly in real-time.
+                </p>
+                <p class="hero-elaborative">
+                    Our platform acts as a secure sandbox where developers, researchers, and AI enthusiasts can model complex real-world environments. By integrating lightweight neural models with web-based 3D engines (Three.js), we simulate multi-agent pathfinding trajectories, complex sensor collisions, and kinematic locomotion constraints. Whether you are validating a warehouse coordinate grid or testing autonomous delivery routes, Spatial Robotics provides a visual, persistent interface to coordinate and inspect physical agent operations. The simulation system maps user coordinates dynamically, calculates optimized trajectories using robust graph-search heuristics (BFS pathfinders), and translates them directly into hardware payload instructions.
+                </p>
+
+                <!-- Features list -->
                 <div class="portal-features-list">
                     <div class="portal-feature-item">
                         <i class="fa-solid fa-network-wired feature-icon"></i>
@@ -68,79 +82,133 @@
                             <p>Row-Level database encryption, sandboxed workspaces, and secure session credentials.</p>
                         </div>
                     </div>
-                </div>
-                <div class="portal-footer-credits">
-                    Google Kaggle Learning Session &copy; 2026. Capstone Project.
+                    <div class="portal-feature-item">
+                        <i class="fa-solid fa-route feature-icon"></i>
+                        <div class="feature-info">
+                            <h4>Pathfinding & Locomotion</h4>
+                            <p>Computes optimized paths and generates step-by-step physical command payloads.</p>
+                        </div>
+                    </div>
                 </div>
             </div>
+        </div>
 
-            <!-- Right Pane: Auth Forms -->
-            <div class="portal-right-pane">
-                <div class="auth-card glass-card">
-                    <div class="auth-tabs">
-                        <button id="tab-login" class="auth-tab active" data-view="login">Sign In</button>
-                        <button id="tab-register" class="auth-tab" data-view="register">Register</button>
-                    </div>
+        <!-- Footer & Disclaimer -->
+        <footer class="landing-footer glass-card">
+            <div class="footer-copyright">
+                Google Kaggle Learning Session &copy; 2026. Capstone Project.
+            </div>
+            <div class="footer-disclaimer">
+                <strong>Disclaimer & Privacy Agreement:</strong> This platform utilizes a Zero-Leak security architecture. If you provide your personal Gemini API key, it is parsed strictly in volatile runtime memory and is never written to disk, stored, or shared. All custom Supabase project credentials are saved locally in your browser's local storage. This application is an educational capstone project, provided "as-is", and the developers assume no liability for costs, rate-limiting penalties, or security policies associated with your developer credentials.
+            </div>
+        </footer>
+    </div>
+
+    <!-- SaaS Sign In Portal -->
+    <div id="login-page" class="hidden auth-view-wrapper">
+        <div class="auth-card-container">
+            <button type="button" id="btn-login-back-home" class="btn-text-link back-home-btn">
+                <i class="fa-solid fa-arrow-left"></i> Back to Home
+            </button>
+            <div class="auth-card glass-card">
+                <div class="auth-form-body">
+                    <h4>Welcome Back</h4>
+                    <p class="auth-subtitle-text">Sign in to access your secure persistent workspaces.</p>
                     
-                    <div class="auth-form-body">
-                        <h4 id="auth-title">Welcome Back</h4>
-                        <p id="auth-subtitle" class="auth-subtitle-text">Sign in to access your secure persistent workspaces.</p>
+                    <form id="auth-form" autocomplete="off">
+                        <div class="auth-input-group">
+                            <label for="auth-email"><i class="fa-solid fa-envelope"></i> Email Address</label>
+                            <input type="email" id="auth-email" placeholder="Enter your email..." required autocomplete="email" />
+                            <span id="email-validation-msg" class="validation-msg hidden">Please enter a valid email address.</span>
+                        </div>
                         
-                        <form id="auth-form" autocomplete="off">
-                            <div id="register-name-group" class="auth-input-group hidden">
-                                <label for="auth-name"><i class="fa-solid fa-user"></i> Full Name</label>
-                                <input type="text" id="auth-name" placeholder="Enter your full name..." autocomplete="name" />
-                            </div>
-
-                            <div class="auth-input-group">
-                                <label for="auth-email"><i class="fa-solid fa-envelope"></i> Email Address</label>
-                                <input type="email" id="auth-email" placeholder="Enter your email..." required autocomplete="email" />
-                                <span id="email-validation-msg" class="validation-msg hidden">Please enter a valid email address.</span>
-                            </div>
-                            
-                            <div class="auth-input-group">
-                                <label for="auth-password"><i class="fa-solid fa-lock"></i> Password</label>
-                                <input type="password" id="auth-password" placeholder="Enter your password..." required autocomplete="current-password" />
-                            </div>
-
-                            <div id="register-confirm-group" class="auth-input-group hidden">
-                                <label for="auth-confirm-password"><i class="fa-solid fa-lock"></i> Confirm Password</label>
-                                <input type="password" id="auth-confirm-password" placeholder="Confirm your password..." autocomplete="new-password" />
-                            </div>
-                            
-                            <!-- Custom Supabase Settings Expandable -->
-                            <div class="custom-db-settings-wrapper">
-                                <button type="button" id="btn-toggle-db-config" class="btn-text-link">
-                                    <i class="fa-solid fa-gears"></i> Custom Supabase Config (Optional)
-                                </button>
-                                <div id="custom-db-fields" class="custom-db-fields hidden">
-                                    <div class="auth-input-group mt-8">
-                                        <label for="db-url"><i class="fa-solid fa-link"></i> Supabase Project URL</label>
-                                        <input type="url" id="db-url" placeholder="https://your-project-id.supabase.co..." />
-                                    </div>
-                                    <div class="auth-input-group mt-8">
-                                        <label for="db-key"><i class="fa-solid fa-key"></i> Anon Public Key</label>
-                                        <input type="text" id="db-key" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." />
-                                    </div>
-                                    <div class="db-config-help">
-                                        Leave blank to use the server's default cloud database configuration.
-                                    </div>
+                        <div class="auth-input-group">
+                            <label for="auth-password"><i class="fa-solid fa-lock"></i> Password</label>
+                            <input type="password" id="auth-password" placeholder="Enter your password..." required autocomplete="current-password" />
+                        </div>
+                        
+                        <!-- Custom Supabase Settings Expandable -->
+                        <div class="custom-db-settings-wrapper">
+                            <button type="button" id="btn-toggle-db-config" class="btn-text-link">
+                                <i class="fa-solid fa-gears"></i> Custom Supabase Config (Optional)
+                            </button>
+                            <div id="custom-db-fields" class="custom-db-fields hidden">
+                                <div class="auth-input-group mt-8">
+                                    <label for="db-url"><i class="fa-solid fa-link"></i> Supabase Project URL</label>
+                                    <input type="url" id="db-url" placeholder="https://your-project-id.supabase.co..." />
                                 </div>
-                            </div>
-                            
-                            <button type="submit" id="btn-auth-submit" class="btn-primary auth-submit-btn">
-                                <i class="fa-solid fa-right-to-bracket"></i> Sign In
-                            </button>
+                                <div class="auth-input-group mt-8">
+                                    <label for="db-key"><i class="fa-solid fa-key"></i> Anon Public Key</label>
+                                    <input type="text" id="db-key" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." />
+                                </div>
+                                <div class="db-config-help">
+                                    Leave blank to use the server's default cloud database configuration.
+                                </div>
+                             </div>
+                        </div>
+                        
+                        <button type="submit" id="btn-auth-submit" class="btn-primary auth-submit-btn">
+                            <i class="fa-solid fa-right-to-bracket"></i> Sign In
+                        </button>
 
-                            <div class="auth-divider">
-                                <span>or</span>
-                            </div>
+                        <div class="auth-divider">
+                            <span>or</span>
+                        </div>
 
-                            <button type="button" id="btn-google-signin" class="btn-google">
-                                <i class="fa-brands fa-google"></i> Continue with Google
-                            </button>
-                        </form>
-                    </div>
+                        <button type="button" id="btn-google-signin" class="btn-google">
+                            <i class="fa-brands fa-google"></i> Continue with Google
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SaaS Register Portal -->
+    <div id="register-page" class="hidden auth-view-wrapper">
+        <div class="auth-card-container">
+            <button type="button" id="btn-register-back-home" class="btn-text-link back-home-btn">
+                <i class="fa-solid fa-arrow-left"></i> Back to Home
+            </button>
+            <div class="auth-card glass-card">
+                <div class="auth-form-body">
+                    <h4>Create Account</h4>
+                    <p class="auth-subtitle-text">Register a secure profile to persist maps and assets.</p>
+                    
+                    <form id="register-form" autocomplete="off">
+                        <div class="auth-input-group">
+                            <label for="auth-name"><i class="fa-solid fa-user"></i> Full Name</label>
+                            <input type="text" id="auth-name" name="name" placeholder="Enter your full name..." required autocomplete="name" />
+                        </div>
+
+                        <div class="auth-input-group">
+                            <label for="register-email"><i class="fa-solid fa-envelope"></i> Email Address</label>
+                            <input type="email" id="register-email" placeholder="Enter your email..." required autocomplete="email" />
+                            <span id="register-email-validation-msg" class="validation-msg hidden">Please enter a valid email address.</span>
+                        </div>
+                        
+                        <div class="auth-input-group">
+                            <label for="register-password"><i class="fa-solid fa-lock"></i> Password</label>
+                            <input type="password" id="register-password" placeholder="Enter your password..." required autocomplete="new-password" />
+                        </div>
+
+                        <div class="auth-input-group">
+                            <label for="auth-confirm-password"><i class="fa-solid fa-lock"></i> Confirm Password</label>
+                            <input type="password" id="auth-confirm-password" name="confirmPassword" placeholder="Confirm your password..." required autocomplete="new-password" />
+                        </div>
+                        
+                        <button type="submit" id="btn-register-submit" class="btn-primary auth-submit-btn">
+                            <i class="fa-solid fa-user-plus"></i> Register
+                        </button>
+
+                        <div class="auth-divider">
+                            <span>or</span>
+                        </div>
+
+                        <button type="button" id="btn-google-signup" class="btn-google">
+                            <i class="fa-brands fa-google"></i> Continue with Google
+                        </button>
+                    </form>
                 </div>
             </div>
         </div>
@@ -370,8 +438,15 @@
                 </div>
                 
                 <div class="terms-scroll-box">
-                    <h5>1. Data Privacy & Zero-Storage Architecture</h5>
-                    <p>Your security is our absolute priority. This platform is engineered with a Zero-Leak architecture. If you optionally choose to input your personal Gemini API key, the key is processed exclusively in volatile runtime memory to authorize your immediate requests. It is never written to disk, never saved to any database, never logged, and never transmitted to any third party under our control.</p>
+                    <h5>1. Data Privacy & Zero-Storage Volatile Architecture (Safe & Secure)</h5>
+                    <p><strong>Your security is our absolute priority.</strong> To prevent developer credentials from leaking, this platform is engineered with a strict <strong>Zero-Storage Volatile Memory Architecture</strong>. If you optionally choose to input your personal Gemini API key:
+                    <ul>
+                        <li>The key is parsed and processed <strong>exclusively in volatile runtime RAM</strong> to authorize immediate AI agent requests.</li>
+                        <li>It is <strong>never written to disk, never saved to any database, never cached, and never logged</strong>.</li>
+                        <li>Once your browser session is closed, or if you click Sign Out, the key is immediately and permanently flushed from volatile memory.</li>
+                        <li>All database configurations (including Supabase Anon keys and project URLs) are stored <strong>strictly client-side in your own browser's Local Storage</strong> and never touch our servers.</li>
+                    </ul>
+                    This process guarantees that your developer credentials remain 100% private, safe, and under your absolute control at all times.</p>
                     
                     <h5>2. API Usage, Costs & Rate Limits</h5>
                     <p>Providing your personal Gemini API key is completely optional. If left blank, the system operates on cached presets or falls back to a local Ollama server. If you choose to enter your own API key to bypass rate limitations, you do so under your own developer credentials and assume full financial and operational responsibility for all tokens consumed, API costs, or rate-limiting penalties on your Google AI Studio account.</p>
@@ -397,6 +472,6 @@
     </div>
 
     <!-- App Logic -->
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=7.0"></script>
 </body>
 </html>
