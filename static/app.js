@@ -1938,7 +1938,7 @@ async function initAuth() {
                     const chkAccept = document.getElementById("chk-accept-welcome-terms");
                     if (chkAccept) chkAccept.checked = false;
                 }
-            } else if (event === "SIGNED_OUT") {
+            } else if (event === "SIGNED_OUT" || (event === "INITIAL_SESSION" && !session)) {
                 supabaseSession = null;
                 sessionToken = "";
                 userEmail = "";
@@ -2253,6 +2253,21 @@ function setupAuthEventListeners() {
                         }
                     });
                     if (error) {
+                        // If user already exists, auto-sign them in instead
+                        if (error.message?.toLowerCase().includes("already registered") || 
+                            error.message?.toLowerCase().includes("already been registered") ||
+                            error.code === "user_already_exists") {
+                            const { data: signInData, error: signInErr } = await supabaseClient.auth.signInWithPassword({ email, password });
+                            if (!signInErr && signInData?.session) {
+                                logToTerminal(`Welcome back ${email}! Signed in to existing account.`, "success");
+                                // onAuthStateChange will route to dashboard
+                                return;
+                            } else {
+                                alert("This email is already registered. Please Sign In instead.");
+                                showView("login");
+                                return;
+                            }
+                        }
                         alert("Registration failed: " + error.message);
                         logToTerminal(`Registration Error: ${error.message}`, "error");
                         return;
@@ -2826,10 +2841,10 @@ function setupWorkspaceEventListeners() {
                     const mapName = file.name.replace(/\.json$/i, "").replace(/[^a-zA-Z0-9_\-]/g, "");
                     const cleanMapName = mapName || "imported";
                     
-                    logToTerminal(`Importing map [${cleanMapName}] into project [${activeProject}]...`, "system");
-                    
                     // 1. Upload to Supabase if not offline
                     if (!isOfflineMode) {
+                        const { data: userData, error: userError } = await supabaseClient.auth.getUser();
+                        if (userError) throw userError;
                         const { error } = await supabaseClient.from('maps').upsert({
                             project_name: activeProject,
                             name: cleanMapName,

@@ -127,25 +127,7 @@
                             <input type="password" id="auth-password" placeholder="Enter your password..." required autocomplete="current-password" />
                         </div>
                         
-                        <!-- Custom Supabase Settings Expandable -->
-                        <div class="custom-db-settings-wrapper">
-                            <button type="button" id="btn-toggle-db-config" class="btn-text-link">
-                                <i class="fa-solid fa-gears"></i> Custom Supabase Config (Optional)
-                            </button>
-                            <div id="custom-db-fields" class="custom-db-fields hidden">
-                                <div class="auth-input-group mt-8">
-                                    <label for="db-url"><i class="fa-solid fa-link"></i> Supabase Project URL</label>
-                                    <input type="url" id="db-url" placeholder="https://your-project-id.supabase.co..." />
-                                </div>
-                                <div class="auth-input-group mt-8">
-                                    <label for="db-key"><i class="fa-solid fa-key"></i> Anon Public Key</label>
-                                    <input type="text" id="db-key" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." />
-                                </div>
-                                <div class="db-config-help">
-                                    Leave blank to use the server's default cloud database configuration.
-                                </div>
-                             </div>
-                        </div>
+
                         
                         <button type="submit" id="btn-auth-submit" class="btn-primary auth-submit-btn">
                             <i class="fa-solid fa-right-to-bracket"></i> Sign In
@@ -472,6 +454,6 @@
     </div>
 
     <!-- App Logic -->
-    <script src="/static/app.js?v=8.0"></script>
+    <script src="/static/app.js?v=9.0"></script>
 </body>
 </html>
