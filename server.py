@@ -132,8 +132,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; "
             "font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; "
-            "img-src 'self' data:; "
-            "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.googleapis.com http://localhost:11434 http://127.0.0.1:11434; "
+            "img-src 'self' data: https://lh3.googleusercontent.com https://*.googleusercontent.com; "
+            "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.googleapis.com https://cdn.jsdelivr.net http://localhost:11434 http://127.0.0.1:11434; "
             "frame-ancestors 'none';"
         )
         response.headers["Content-Security-Policy"] = csp_directives

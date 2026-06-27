@@ -2141,25 +2141,10 @@ function setupAuthEventListeners() {
             }
             if (emailValidationMsg) emailValidationMsg.classList.add("hidden");
 
-            // Check for inline custom database configuration
-            const dbUrl = document.getElementById("db-url").value.trim();
-            const dbKey = document.getElementById("db-key").value.trim();
-            if (dbUrl && dbKey) {
-                const check = isValidSupabaseConfig(dbUrl, dbKey);
-                if (check.valid) {
-                    localStorage.setItem("custom_supabase_url", dbUrl);
-                    localStorage.setItem("custom_supabase_key", dbKey);
-                    supabaseClient = window.supabase.createClient(dbUrl, dbKey);
-                    window.supabaseClient = supabaseClient;
-                    isOfflineMode = false;
-                } else {
-                    alert(`Custom Supabase config invalid (${check.reason}). Please check your URL and key.`);
-                    return;
-                }
-            } else {
-                localStorage.removeItem("custom_supabase_url");
-                localStorage.removeItem("custom_supabase_key");
-            }
+            // No custom DB config (was removed from UI - env vars handle this)
+            localStorage.removeItem("custom_supabase_url");
+            localStorage.removeItem("custom_supabase_key");
+
 
             btnAuthSubmit.disabled = true;
             btnAuthSubmit.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Processing...`;
@@ -2420,11 +2405,23 @@ async function loadProjectsList() {
             projects = await response.json();
         } else {
             const { data, error } = await supabaseClient.from('projects').select('name').order('name', { ascending: true });
-            if (error) throw error;
-            projects = data.map(p => p.name);
+            if (error) {
+                // Table may not exist yet — show a clear message but DON'T crash the auth flow
+                if (error.code === 'PGRST205' || error.message?.includes("schema cache") || error.message?.includes("not found")) {
+                    console.warn("⚠️ Supabase 'projects' table not found. Run the SQL setup script in your Supabase dashboard.");
+                    logToTerminal("⚠️ Database not set up yet. Please run the SQL script in your Supabase SQL Editor to create tables.", "warn");
+                    // Show dashboard anyway with empty project list
+                } else {
+                    throw error;
+                }
+                projects = [];
+            } else {
+                projects = data.map(p => p.name);
+            }
         }
         
         const select = document.getElementById("project-select");
+        if (!select) return;
         select.innerHTML = '<option value="">-- Select Project --</option>';
         
         projects.forEach(p => {
@@ -2439,7 +2436,8 @@ async function loadProjectsList() {
         }
     } catch (err) {
         console.error("Failed to load projects list:", err);
-        logToTerminal(`Failed to load projects list: ${err.message}`, "error");
+        logToTerminal(`Failed to load projects: ${err.message}`, "error");
+        // Do NOT redirect — just show empty list
     }
 }
 
