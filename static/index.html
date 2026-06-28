@@ -458,7 +458,52 @@
         </div>
     </div>
 
+    <!-- Welcome Terms & Conditions Modal [NEW] -->
+    <div id="welcome-terms-modal" class="modal-overlay hidden">
+        <div class="modal-content glass-card welcome-modal-content">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-shield-halved"></i> Terms of Service & Privacy Agreement</h3>
+            </div>
+            <div class="modal-body welcome-modal-body">
+                <div class="welcome-intro">
+                    Welcome to the <strong>Spatial Robotics Autonomous 3D Arena</strong>. Before accessing the interactive simulation dashboard and agent orchestration station, you must read and accept the safety and privacy terms below.
+                </div>
+                
+                <div class="terms-scroll-box">
+                    <h5>1. Data Privacy & Zero-Storage Volatile Architecture (Safe & Secure)</h5>
+                    <p><strong>Your security is our absolute priority.</strong> To prevent developer credentials from leaking, this platform is engineered with a strict <strong>Zero-Storage Volatile Memory Architecture</strong>. If you optionally choose to input your personal Gemini API key:
+                    <ul>
+                        <li>The key is parsed and processed <strong>exclusively in volatile runtime RAM</strong> to authorize immediate AI agent requests.</li>
+                        <li>It is <strong>never written to disk, never saved to any database, never cached, and never logged</strong>.</li>
+                        <li>Once your browser session is closed, or if you click Sign Out, the key is immediately and permanently flushed from volatile memory.</li>
+                        <li>All database configurations (including Supabase Anon keys and project URLs) are stored <strong>strictly client-side in your own browser's Local Storage</strong> and never touch our servers.</li>
+                    </ul>
+                    This process guarantees that your developer credentials remain 100% private, safe, and under your absolute control at all times.</p>
+                    
+                    <h5>2. API Usage, Costs & Rate Limits</h5>
+                    <p>Providing your personal Gemini API key is completely optional. If left blank, the system operates on cached presets or falls back to a local Ollama server. If you choose to enter your own API key to bypass rate limitations, you do so under your own developer credentials and assume full financial and operational responsibility for all tokens consumed, API costs, or rate-limiting penalties on your Google AI Studio account.</p>
+                    
+                    <h5>3. Disclaimer of Liability & Project Scope</h5>
+                    <p>This software is an educational capstone project developed for the Kaggle 5-Day AI Learning Session powered by Google. It is provided "as-is" without warranty of any kind, express or implied. The developer and Google shall not be held liable for any direct, indirect, or consequential damages, including Google account suspensions or financial charges, arising from your use of this platform.</p>
+                </div>
+                
+                <div class="terms-acceptance-row">
+                    <label class="checkbox-container">
+                        <input type="checkbox" id="chk-accept-welcome-terms" />
+                        <span class="checkbox-label">I have read, understood, and agree to these Terms and Conditions.</span>
+                    </label>
+                </div>
+                
+                <div class="modal-footer welcome-footer">
+                    <button id="btn-accept-welcome" class="btn-primary" disabled>
+                        <i class="fa-solid fa-circle-check"></i> Accept & Access Dashboard
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- App Logic -->
-    <script src="/static/app.js?v=12.0"></script>
+    <script src="/static/app.js?v=13.0"></script>
 </body>
 </html>

@@ -286,7 +286,50 @@ function setupEventListeners() {
         });
     }
     
-    // Removed Welcome Terms Modal Logic
+    // Welcome Terms Modal Logic [NEW]
+    const welcomeModal = document.getElementById("welcome-terms-modal");
+    const chkAccept = document.getElementById("chk-accept-welcome-terms");
+    const btnAccept = document.getElementById("btn-accept-welcome");
+    
+    if (welcomeModal && chkAccept && btnAccept) {
+        // Listen to checkbox change to enable/disable accept button
+        chkAccept.addEventListener("change", (e) => {
+            btnAccept.disabled = !e.target.checked;
+        });
+        
+        // Listen to accept button click
+        btnAccept.addEventListener("click", async () => {
+            if (!chkAccept.checked) return;
+            
+            btnAccept.disabled = true;
+            btnAccept.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Processing...`;
+            
+            try {
+                const isSimulated = isOfflineMode || (sessionToken && sessionToken.startsWith("mock-"));
+                if (isSimulated) {
+                    localStorage.setItem("spatial_robotics_terms_accepted", "true");
+                    welcomeModal.classList.add("hidden");
+                    logToTerminal("Terms of Service accepted (Local Simulation Mode). Welcome!", "success");
+                } else {
+                    localStorage.setItem("spatial_robotics_terms_accepted", "true");
+                    const { error } = await supabaseClient.auth.updateUser({
+                        data: { terms_accepted_at: new Date().toISOString() }
+                    });
+                    if (error) throw error;
+                    welcomeModal.classList.add("hidden");
+                    logToTerminal("Terms of Service and Privacy Agreement accepted. Welcome to the dashboard!", "success");
+                    // Explicitly show dashboard and load projects (USER_UPDATED won't do this)
+                    showView("dashboard");
+                    await loadProjectsList();
+                }
+            } catch (err) {
+                alert("Failed to save terms acceptance: " + err.message);
+                btnAccept.disabled = false;
+            } finally {
+                btnAccept.innerHTML = `<i class="fa-solid fa-circle-check"></i> Accept & Access Dashboard`;
+            }
+        });
+    }
 }
 
 // Load Prompt Presets
@@ -1820,9 +1863,29 @@ async function initAuth() {
                 const emailDisp = document.getElementById("user-email-display");
                 if (emailDisp) emailDisp.textContent = userEmail;
 
-                showView("dashboard");
-                hideAuthLoader();
-                await loadProjectsList();
+                // On USER_UPDATED (e.g. after terms accepted), just stay on dashboard - don't re-evaluate modal
+                if (event === "USER_UPDATED") {
+                    hideAuthLoader();
+                    return;
+                }
+
+                const termsAcceptedAt = session.user.user_metadata?.terms_accepted_at || (localStorage.getItem("spatial_robotics_terms_accepted") === "true");
+                if (termsAcceptedAt) {
+                    showView("dashboard");
+                    const welcomeModal = document.getElementById("welcome-terms-modal");
+                    if (welcomeModal) welcomeModal.classList.add("hidden");
+                    hideAuthLoader();
+                    await loadProjectsList();
+                } else {
+                    showView("dashboard");
+                    const welcomeModal = document.getElementById("welcome-terms-modal");
+                    if (welcomeModal) welcomeModal.classList.remove("hidden");
+                    hideAuthLoader();
+                    const btnAccept = document.getElementById("btn-accept-welcome");
+                    if (btnAccept) btnAccept.disabled = true;
+                    const chkAccept = document.getElementById("chk-accept-welcome-terms");
+                    if (chkAccept) chkAccept.checked = false;
+                }
             } else if (event === "SIGNED_OUT" || (event === "INITIAL_SESSION" && !session)) {
                 supabaseSession = null;
                 sessionToken = "";
