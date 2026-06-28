@@ -179,24 +179,7 @@
                             <input type="password" id="auth-password" placeholder="Enter your password..." required autocomplete="current-password" />
                         </div>
                         
-                        <div class="auth-db-toggle-wrapper" style="margin-top: 12px; text-align: center;">
-                            <button type="button" id="btn-toggle-db-config" class="btn-text-link" style="background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.85rem; padding: 4px 8px;">
-                                <i class="fa-solid fa-gears"></i> Custom Supabase Config (Optional)
-                            </button>
-                        </div>
-                        
-                        <div id="custom-db-fields" class="hidden" style="margin-top: 12px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 12px; display: flex; flex-direction: column; gap: 8px;">
-                            <div class="auth-input-group">
-                                <label for="db-url" style="display: block; margin-bottom: 4px; font-size: 0.85rem;"><i class="fa-solid fa-cloud"></i> Supabase URL</label>
-                                <input type="url" id="db-url" placeholder="https://your-project.supabase.co" style="width: 100%;" />
-                            </div>
-                            <div class="auth-input-group">
-                                <label for="db-key" style="display: block; margin-bottom: 4px; font-size: 0.85rem;"><i class="fa-solid fa-key"></i> Supabase Anon Key</label>
-                                <input type="password" id="db-key" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpX... (JWT)" style="width: 100%;" />
-                            </div>
-                        </div>
-
-                        <button type="submit" id="btn-auth-submit" class="btn-primary auth-submit-btn" style="margin-top: 12px;">
+                        <button type="submit" id="btn-auth-submit" class="btn-primary auth-submit-btn">
                             <i class="fa-solid fa-right-to-bracket"></i> Sign In
                         </button>
 

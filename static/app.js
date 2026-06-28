@@ -2062,49 +2062,12 @@ function setupAuthEventListeners() {
 
     // Sign In form submission
     if (authForm) {
-        // Inject a local-mode shortcut button just above the submit button (once)
-        if (btnAuthSubmit && isOfflineMode && !document.getElementById("btn-local-enter")) {
-            const localBtn = document.createElement("button");
-            localBtn.type = "button";
-            localBtn.id = "btn-local-enter";
-            localBtn.className = "btn-primary auth-submit-btn";
-            localBtn.style.cssText = "background: linear-gradient(135deg,#ffd600,#ff6d00); margin-bottom:8px;";
-            localBtn.innerHTML = `<i class="fa-solid fa-laptop-code"></i> Enter Dashboard (Local Mode)`;
-            localBtn.addEventListener("click", () => {
-                document.getElementById("user-email-display").textContent = "local-dev-user@example.com";
-                logToTerminal("SaaS Status: Entered Offline Local Developer Mode.", "success");
-                showView("dashboard");
-                loadProjectsList();
-            });
-            btnAuthSubmit.parentNode.insertBefore(localBtn, btnAuthSubmit);
-        }
-
         authForm.addEventListener("submit", async (e) => {
             e.preventDefault();
 
             // ── Offline mode: cloud auth not possible ─────────────────────────
             if (isOfflineMode || !supabaseClient) {
-                // Try to re-init if user filled in custom fields
-                const dbUrl = document.getElementById("db-url")?.value.trim() || "";
-                const dbKey = document.getElementById("db-key")?.value.trim() || "";
-                const check = isValidSupabaseConfig(dbUrl, dbKey);
-
-                if (check.valid) {
-                    localStorage.setItem("custom_supabase_url", dbUrl);
-                    localStorage.setItem("custom_supabase_key", dbKey);
-                    alert("Credentials saved! Reloading to connect to your Supabase project...");
-                    window.location.reload();
-                    return;
-                }
-
-                alert(
-                    "You are in Offline / Local Dev Mode — cloud login is disabled.\n\n" +
-                    "To enable Sign In & Register:\n" +
-                    "1. Create a free Supabase project at supabase.com\n" +
-                    "2. Copy your Project URL and Anon Key\n" +
-                    "3. Paste them into the ⚙ Custom Config fields below, then click Sign In again.\n\n" +
-                    "OR — click the orange 'Enter Dashboard (Local Mode)' button to use the app without an account."
-                );
+                alert("The application is currently operating in offline mode. Cloud authentication is unavailable.");
                 return;
             }
 
@@ -2171,12 +2134,7 @@ function setupAuthEventListeners() {
             e.preventDefault();
 
             if (isOfflineMode || !supabaseClient) {
-                alert(
-                    "You are in Offline / Local Dev Mode — cloud registration is disabled.\n\n" +
-                    "To enable Sign In & Register:\n" +
-                    "1. Create a free Supabase project at supabase.com\n" +
-                    "2. Paste the credentials into the ⚙ Custom Config fields on the Sign In page."
-                );
+                alert("The application is currently operating in offline mode. Cloud registration is unavailable.");
                 return;
             }
 
