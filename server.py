@@ -669,6 +669,12 @@ if not os.path.exists(PROJECTS_DIR):
 
 def verify_supabase_token(token: str) -> dict:
     """Verifies a Supabase JWT token by calling the Supabase Auth server."""
+    # Check if we should use local fallback for mock/simulation tokens
+    if not token or token.startswith("mock-") or token.startswith("local-dev-") or token == "local-dev-id":
+        logger.info("Using local simulation fallback for mock token.")
+        email = "google-oauth-user@example.com" if "google" in token else "local-dev-user@example.com"
+        return {"id": "local-dev-id", "email": email}
+
     supabase_url = os.environ.get("SUPABASE_URL")
     if not supabase_url:
         # Fallback to local developer account in development/anonymous mode

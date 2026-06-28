@@ -311,6 +311,7 @@ function setupEventListeners() {
                     welcomeModal.classList.add("hidden");
                     logToTerminal("Terms of Service accepted (Local Simulation Mode). Welcome!", "success");
                 } else {
+                    localStorage.setItem("spatial_robotics_terms_accepted", "true");
                     const { error } = await supabaseClient.auth.updateUser({
                         data: { terms_accepted_at: new Date().toISOString() }
                     });
@@ -1700,7 +1701,8 @@ function isValidEmailAddress(email) {
  * Points back to the current app origin so Supabase can redirect the user home.
  */
 function getAuthRedirectUrl() {
-    return `${window.location.origin}/`;
+    // Redirect to the current path without query/hash, to support subdirectories and specific files
+    return window.location.href.split('#')[0].split('?')[0];
 }
 
 /**
@@ -1710,11 +1712,9 @@ function getAuthRedirectUrl() {
  *   Authentication → Providers → Google → Enable.
  */
 async function handleGoogleSignIn() {
-    if (!supabaseClient) throw new Error("Supabase client not initialized.");
-
-    // Check if we are running on localhost/127.0.0.1 or in a test environment
-    if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
-        console.warn("Running in local test environment. Simulating Google OAuth flow to prevent navigation to unreachable cloud domain.");
+    // If offline, simulate the Google OAuth flow directly
+    if (isOfflineMode || !supabaseClient) {
+        console.warn("Running in offline mode. Simulating Google OAuth flow.");
         userEmail = "google-oauth-user@example.com";
         sessionToken = "mock-google-oauth-jwt-token";
         const emailDisp = document.getElementById("user-email-display");
@@ -1740,6 +1740,7 @@ async function handleGoogleSignIn() {
         return;
     }
 
+    // If we are on localhost but have valid Supabase config, we can use real Google login.
     const { error } = await supabaseClient.auth.signInWithOAuth({
         provider: "google",
         options: {
@@ -1794,6 +1795,7 @@ function isValidSupabaseConfig(url, key) {
     try { new URL(url); } catch { return { valid: false, reason: "INVALID_URL" }; }
     if (!url.startsWith("https://")) return { valid: false, reason: "NOT_HTTPS" };
     if (key.length < 30) return { valid: false, reason: "KEY_TOO_SHORT" };
+    if (key.startsWith("sb_") || key.split('.').length < 3) return { valid: false, reason: "INVALID_JWT" };
     return { valid: true, reason: "OK" };
 }
 
@@ -1811,6 +1813,7 @@ function showConfigWarningUI(reason) {
         INVALID_URL:"⚠️ SUPABASE_URL is not a valid URL. Check your .env file.",
         NOT_HTTPS:  "⚠️ SUPABASE_URL must start with https://. Check your .env file.",
         KEY_TOO_SHORT:"⚠️ Supabase anon key looks invalid (too short). Check your .env file.",
+        INVALID_JWT:  "⚠️ Supabase anon key is not a valid JWT. Using Local Offline Mode.",
     };
     const msg = messages[reason] || "⚠️ Supabase configuration is invalid.";
 
@@ -1833,6 +1836,15 @@ function showConfigWarningUI(reason) {
         const tabs = authCard.querySelector(".auth-tabs");
         authCard.insertBefore(banner, tabs || authCard.firstChild);
     }
+}
+
+// ─── Main auth bootstrap ────────────────────────────────────────────────────
+// Helper to hide the portal loading screen
+function hideAuthLoader() {
+    const loader = document.getElementById("auth-loading-screen");
+    if (loader) loader.style.display = "none";
+    const style = document.getElementById("auth-loading-style");
+    if (style) style.remove();
 }
 
 // ─── Main auth bootstrap ────────────────────────────────────────────────────
@@ -1866,6 +1878,7 @@ async function initAuth() {
 
             // Show landing page by default
             showView("landing");
+            hideAuthLoader();
 
             // Still wire up all listeners (tabs, custom config, enter-dashboard shortcut, etc.)
             setupAuthEventListeners();
@@ -1890,18 +1903,20 @@ async function initAuth() {
 
                 // On USER_UPDATED (e.g. after terms accepted), just stay on dashboard - don't re-evaluate modal
                 if (event === "USER_UPDATED") {
-                    // Already on dashboard, no action needed
+                    hideAuthLoader();
                     return;
                 }
 
-                const termsAcceptedAt = session.user.user_metadata?.terms_accepted_at;
+                const termsAcceptedAt = session.user.user_metadata?.terms_accepted_at || (localStorage.getItem("spatial_robotics_terms_accepted") === "true");
                 if (termsAcceptedAt) {
                     showView("dashboard");
                     document.getElementById("welcome-terms-modal").classList.add("hidden");
+                    hideAuthLoader();
                     await loadProjectsList();
                 } else {
                     showView("dashboard");
                     document.getElementById("welcome-terms-modal").classList.remove("hidden");
+                    hideAuthLoader();
                     const btnAccept = document.getElementById("btn-accept-welcome");
                     if (btnAccept) btnAccept.disabled = true;
                     const chkAccept = document.getElementById("chk-accept-welcome-terms");
@@ -1912,6 +1927,7 @@ async function initAuth() {
                 sessionToken = "";
                 userEmail = "";
                 showView("landing");
+                hideAuthLoader();
             }
         });
 
@@ -1923,6 +1939,7 @@ async function initAuth() {
         isOfflineMode = true;
         showConfigWarningUI("MISSING");
         showView("landing");
+        hideAuthLoader();
         setupAuthEventListeners();
     }
 }
@@ -2010,22 +2027,12 @@ function setupAuthEventListeners() {
 
     // Google OAuth helper
     const handleGoogleAuthClick = async (btnEl) => {
-        // Offline mode: Google OAuth is impossible without a real Supabase project
-        if (isOfflineMode || !supabaseClient) {
-            alert(
-                "Google Sign-In/Up requires a real Supabase project.\n\n" +
-                "Steps to enable it:\n" +
-                "1. Create a free project at supabase.com\n" +
-                "2. Go to Authentication → Providers → Google → Enable\n" +
-                "3. Add your Google OAuth Client ID & Secret from console.cloud.google.com\n" +
-                "4. Paste your Supabase URL + Anon Key into the ⚙ Custom Config field on the Sign In page."
-            );
-            return;
-        }
-
         const originalHtml = btnEl.innerHTML;
-        btnEl.disabled = true;
-        btnEl.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Redirecting to Google...`;
+        
+        if (!isOfflineMode && supabaseClient) {
+            btnEl.disabled = true;
+            btnEl.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Redirecting to Google...`;
+        }
 
         try {
             await handleGoogleSignIn();
@@ -2040,6 +2047,7 @@ function setupAuthEventListeners() {
                 alert("Google OAuth failed: " + msg);
             }
             logToTerminal(`Google OAuth Error: ${msg}`, "error");
+        } finally {
             btnEl.disabled = false;
             btnEl.innerHTML = originalHtml;
         }
