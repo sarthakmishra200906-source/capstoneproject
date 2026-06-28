@@ -1803,41 +1803,6 @@ function isValidSupabaseConfig(url, key) {
  * Shows a status banner in the auth card without hiding the form.
  * This lets the user still enter custom Supabase credentials inline.
  */
-function showConfigWarningUI(reason) {
-    const existing = document.getElementById("auth-status-banner");
-    if (existing) return; // already shown
-
-    const messages = {
-        MISSING:    "⚠️ No Supabase credentials found. You are in Local Offline Mode.",
-        PLACEHOLDER:"⚠️ Placeholder credentials detected in .env — using Local Offline Mode.",
-        INVALID_URL:"⚠️ SUPABASE_URL is not a valid URL. Check your .env file.",
-        NOT_HTTPS:  "⚠️ SUPABASE_URL must start with https://. Check your .env file.",
-        KEY_TOO_SHORT:"⚠️ Supabase anon key looks invalid (too short). Check your .env file.",
-        INVALID_JWT:  "⚠️ Supabase anon key is not a valid JWT. Using Local Offline Mode.",
-    };
-    const msg = messages[reason] || "⚠️ Supabase configuration is invalid.";
-
-    const banner = document.createElement("div");
-    banner.id = "auth-status-banner";
-    banner.className = "auth-status-banner";
-    banner.innerHTML = `
-        <i class="fa-solid fa-triangle-exclamation"></i>
-        <span>${msg}</span>
-        <span class="offline-mode-tip">
-            You can still <strong>use the dashboard locally</strong> without an account,
-            or paste your real Supabase credentials in the
-            <i class="fa-solid fa-gears"></i> <strong>Custom Config</strong> field below and re-submit.
-        </span>
-    `;
-
-    const authCard = document.querySelector(".auth-card");
-    if (authCard) {
-        // Insert before the tabs, so form stays fully visible
-        const tabs = authCard.querySelector(".auth-tabs");
-        authCard.insertBefore(banner, tabs || authCard.firstChild);
-    }
-}
-
 // ─── Main auth bootstrap ────────────────────────────────────────────────────
 // Helper to hide the portal loading screen
 function hideAuthLoader() {
@@ -1872,9 +1837,6 @@ async function initAuth() {
             // Log clearly so developer can see in console exactly why
             console.error(`🔒 Supabase config rejected. Reason: ${configCheck.reason}`, { url, key: key ? key.slice(0, 12) + "…" : "(empty)" });
             isOfflineMode = true;
-
-            // Show warning banner above the form (form stays visible for custom creds)
-            showConfigWarningUI(configCheck.reason);
 
             // Show landing page by default
             showView("landing");
@@ -1937,7 +1899,6 @@ async function initAuth() {
         console.error("🔴 Fatal auth system initialization failure:", err);
         logToTerminal("Auth Error: Failed to init auth. Entering offline fallback.", "error");
         isOfflineMode = true;
-        showConfigWarningUI("MISSING");
         showView("landing");
         hideAuthLoader();
         setupAuthEventListeners();
