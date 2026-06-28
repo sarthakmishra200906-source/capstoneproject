@@ -2149,8 +2149,11 @@ function setupAuthEventListeners() {
                                 logToTerminal(`Welcome back ${email}! Signed in to existing account.`, "success");
                                 return; // onAuthStateChange will route to dashboard
                             } else {
-                                alert("This email is already registered. Please use Sign In with the correct password, or use Continue with Google.");
+                                // Pre-fill email in the sign-in form and switch to sign-in view
                                 showView("login");
+                                const loginEmailInput = document.getElementById("auth-email");
+                                if (loginEmailInput) loginEmailInput.value = email;
+                                alert("This email is already registered. Your password may be incorrect — please try Sign In above with the correct password.");
                                 return;
                             }
                         }
